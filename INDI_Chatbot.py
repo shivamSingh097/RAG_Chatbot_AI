@@ -2,7 +2,6 @@ import streamlit as st
 import os
 import json
 import time
-from dotenv import load_dotenv
 from PIL import Image
 
 # LangChain imports
