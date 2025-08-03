@@ -20,7 +20,7 @@ from langchain.agents import Tool
 from transformers import pipeline
 
 # Load environment variables (SERPER_API_KEY etc.)
-load_dotenv()
+api_key = st.secrets["SERPER_API_KEY"]
 
 # --- Session State ---
 if "chat_history" not in st.session_state:
