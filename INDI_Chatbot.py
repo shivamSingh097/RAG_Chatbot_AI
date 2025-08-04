@@ -16,7 +16,7 @@ from langchain_community.utilities import GoogleSerperAPIWrapper
 from langchain.agents import Tool
 
 # ------------------ File Check ------------------
-file_path = "data.txt"
+file_path = "/docs"
 if not os.path.exists(file_path):
     st.error("❌ 'data.txt' not found. Please upload it to the root directory.")
     st.stop()
