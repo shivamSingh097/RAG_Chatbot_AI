@@ -18,7 +18,6 @@ from langchain.document_loaders import TextLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 # --- Load environment variables ---
-load_dotenv()
 
 # --- Load SERPER API Key from secrets ---
 api_key = os.getenv("SERPER_API_KEY") or st.secrets["SERPER_API_KEY"]
