@@ -4,6 +4,6 @@ langchain-community
 unstructured[all-extra]
 sentence-transformers
 transformers
-chromadb
+pysqlite3-binary  # Add this line
 python-dotenv
 google-search-results
