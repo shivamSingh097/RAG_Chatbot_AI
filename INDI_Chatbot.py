@@ -6,7 +6,6 @@ from dotenv import load_dotenv
 import sqlite3
 import sys
 # Core LangChain imports for RAG
-from langchain_chroma import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.llms import HuggingFacePipeline
 from langchain.chains import RetrievalQA
@@ -16,6 +15,10 @@ from langchain.agents import Tool
 from langchain.prompts import PromptTemplate
 # Hugging Face pipeline for the local LLM
 from transformers import pipeline
+
+from langchain.vectorstores import FAISS
+# Example usage
+vectorstore = FAISS.from_documents(documents, embeddings)
 # Load environment variables (SERPER_API_KEY etc.)
 api_key = st.secrets["SERPER_API_KEY"]
 
