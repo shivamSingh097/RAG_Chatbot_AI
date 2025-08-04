@@ -19,11 +19,9 @@ if not os.path.exists(FAISS_INDEX_PATH):
     st.error("❌ FAISS index not found. Please run ingest.py first.")
     st.stop()
 
-<<<<<<< HEAD
 with open(FAISS_INDEX_PATH, "rb") as f:
     vector_db = pickle.load(f)
 
-=======
 # ------------------ Check FAISS index ------------------
 FAISS_INDEX_PATH = "faiss_index.pkl"
 if not os.path.exists(FAISS_INDEX_PATH):
