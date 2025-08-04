@@ -95,15 +95,14 @@ if "user_logged_in" not in st.session_state:
     st.stop()
 
 # ===================== LLM =====================
-text_generation_pipeline = pipeline(
+text_generation_pipeline = pipe = pipeline(
     "text-generation",
-    model="meta-llama/Meta-Llama-3.1-8B-Instruct",
+    model="mistralai/Mistral-7B-Instruct-v0.1",
     trust_remote_code=True,
     max_new_tokens=512,
     temperature=0.7,
-    device_map="auto"   # uses CPU on Streamlit Cloud
+    device_map="auto"
 )
-llm = HuggingFacePipeline(pipeline=text_generation_pipeline)
 
 # ===================== Retrieval QA =====================
 memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
