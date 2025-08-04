@@ -2,9 +2,8 @@ import streamlit as st
 import os
 import json
 import time
-from dotenv import load_dotenv
 from PIL import Image
-
+# Made by Shivam Singh Bhadoriya
 # LangChain imports
 from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
