@@ -16,7 +16,17 @@ from langchain_community.utilities import GoogleSerperAPIWrapper
 from langchain.agents import Tool
 from langchain.document_loaders import TextLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.document_loaders import TextLoader
+import os
 
+file_path = "data.txt"
+
+if not os.path.exists(file_path):
+    st.error("❌ 'data.txt' not found. Please upload it to the root directory.")
+    st.stop()
+
+loader = TextLoader(file_path)
+raw_docs = loader.load()
 # --- Load environment variables ---
 
 # --- Load SERPER API Key from secrets ---
