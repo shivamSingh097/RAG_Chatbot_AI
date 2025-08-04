@@ -2,27 +2,20 @@ import streamlit as st
 import json
 import os
 from dotenv import load_dotenv
-
 # These two lines must be at the very top to fix the pysqlite3 error
 import sqlite3
 import sys
-sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
-
 # Core LangChain imports for RAG
 from langchain_chroma import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.llms import HuggingFacePipeline
 from langchain.chains import RetrievalQA
-
 # Imports for web search
 from langchain_community.utilities import GoogleSerperAPIWrapper
 from langchain.agents import Tool
 from langchain.prompts import PromptTemplate
-
 # Hugging Face pipeline for the local LLM
 from transformers import pipeline
-
-
 # Load environment variables (SERPER_API_KEY etc.)
 api_key = st.secrets["SERPER_API_KEY"]
 
