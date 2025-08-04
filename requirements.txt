@@ -3,4 +3,8 @@ langchain
 faiss-cpu
 openai
 python-dotenv
+<<<<<<< HEAD
 tiktoken
+=======
+tiktoken
+>>>>>>> 817256bdca6d0823bb94447e4ee7089169b5053a
