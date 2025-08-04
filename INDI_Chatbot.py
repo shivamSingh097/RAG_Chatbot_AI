@@ -10,11 +10,14 @@ from langchain.memory import ConversationBufferMemory
 from langchain_community.utilities import GoogleSerperAPIWrapper
 from langchain.agents import Tool
 from langchain_community.llms import HuggingFacePipeline
+from huggingface_hub import login
 
 # ===================== API Key =====================
 # Load environment variables (SERPER_API_KEY etc.)
 api_key = st.secrets["SERPER_API_KEY"]
 
+HF_TOKEN = os.environ.get("HUGGINGFACEHUB_API_TOKEN", st.secrets.get("HUGGINGFACEHUB_API_TOKEN"))
+login(HF_TOKEN)
 # ===================== Check FAISS Index =====================
 FAISS_INDEX_PATH = "faiss_index.pkl"
 if not os.path.exists(FAISS_INDEX_PATH):
