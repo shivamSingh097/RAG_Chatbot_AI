@@ -7,6 +7,8 @@ from huggingface_hub import login
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
 from langchain_community.llms import HuggingFaceHub
+from transformers import pipeline
+from langchain_community.llms import HuggingFacePipeline
 
 # ===================== API Key (Hugging Face) =====================
 HF_TOKEN = os.environ.get("HUGGINGFACEHUB_API_TOKEN", st.secrets.get("HUGGINGFACEHUB_API_TOKEN"))
@@ -92,11 +94,13 @@ if "user_logged_in" not in st.session_state:
     st.stop()
 
 # ===================== LLM (Hugging Face Hub) =====================
-llm = HuggingFaceHub(
-    repo_id="mistralai/Mistral-7B-Instruct-v0.1",
-    huggingfacehub_api_token=HF_TOKEN,
-    model_kwargs={"temperature": 0.7, "max_new_tokens": 512}
+text_generation_pipeline = pipeline(
+    "text2text-generation",  # For FLAN-T5
+    model="google/flan-t5-base",
+    max_new_tokens=256,
+    temperature=0.7
 )
+llm = HuggingFacePipeline(pipeline=text_generation_pipeline)
 
 # ===================== Retrieval QA (with conversation memory) =====================
 memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
