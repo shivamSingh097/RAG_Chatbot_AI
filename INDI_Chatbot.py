@@ -1,30 +1,27 @@
 import streamlit as st
-import os
 import json
-import time
-from PIL import Image
-# Add this code at the very top of your script
-__import__('pysqlite3')
+import os
+from dotenv import load_dotenv
+
+# These two lines must be at the very top to fix the pysqlite3 error
 __import__('pysqlite3')
 import sys
 sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 
-# Now your existing imports can follow
-from langchain_chroma import Chroma
-from langchain_community.embeddings import HuggingFaceEmbeddings
-
+# Core LangChain imports for RAG
 from langchain_chroma import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.llms import HuggingFacePipeline
 from langchain.chains import RetrievalQA
-from langchain_chroma import Chroma
 
-# Web Search (optional)
+# Imports for web search
 from langchain_community.utilities import GoogleSerperAPIWrapper
 from langchain.agents import Tool
+from langchain.prompts import PromptTemplate
 
-# Transformers
+# Hugging Face pipeline for the local LLM
 from transformers import pipeline
+
 
 # Load environment variables (SERPER_API_KEY etc.)
 api_key = st.secrets["SERPER_API_KEY"]
