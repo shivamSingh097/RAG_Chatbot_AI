@@ -8,3 +8,4 @@ sentence-transformers
 faiss-cpu
 transformers
 accelerate
+google-search-results
