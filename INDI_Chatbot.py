@@ -33,7 +33,6 @@ if not os.path.exists(FAISS_INDEX_PATH):
 with open(FAISS_INDEX_PATH, "rb") as f:
     vector_db = pickle.load(f)
 
->>>>>>> 817256bdca6d0823bb94447e4ee7089169b5053a
 # ------------------ Session State ------------------
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
