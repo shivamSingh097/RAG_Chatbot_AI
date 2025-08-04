@@ -1,19 +1,19 @@
 import streamlit as st
 import json
 import os
-from dotenv import load_dotenv
 from PIL import Image
 from transformers import pipeline
+from dotenv import load_dotenv
 
-# LangChain core components
+# LangChain components
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.llms import HuggingFacePipeline
 from langchain.chains import RetrievalQA
-from langchain_community.vectorstores import Chroma
-from langchain_community.utilities import GoogleSerperAPIWrapper
-from langchain.agents import Tool
+from langchain_community.vectorstores import FAISS, Chroma
 from langchain_community.document_loaders import TextLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.utilities import GoogleSerperAPIWrapper
+from langchain.agents import Tool
 
 # ------------------ File Check ------------------
 file_path = "data.txt"
@@ -27,9 +27,6 @@ if not raw_docs:
     st.error("❌ No content found in data.txt.")
     st.stop()
 
-# ------------------ Environment ------------------
-api_key = os.getenv("SERPER_API_KEY") or st.secrets.get("SERPER_API_KEY")
-
 # ------------------ Session State ------------------
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
@@ -41,7 +38,7 @@ if "loading" not in st.session_state:
 def toggle_theme():
     st.session_state.dark_mode = not st.session_state.dark_mode
 
-# ------------------ Login Page ------------------
+# ------------------ User Authentication ------------------
 def login_page():
     st.title("🔐 Welcome to INDIBOT")
     st.markdown("---")
@@ -96,11 +93,17 @@ if "user_logged_in" not in st.session_state:
     login_page()
     st.stop()
 
-# ------------------ Embeddings & VectorDB (Chroma) ------------------
+# ------------------ Embeddings ------------------
 embedding = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
 documents = text_splitter.split_documents(raw_docs)
-vector_db = Chroma.from_documents(documents, embedding)
+
+# ------------------ VectorDB (FAISS primary, Chroma fallback) ------------------
+try:
+    vector_db = FAISS.from_documents(documents, embedding)
+except Exception as e:
+    st.warning(f"FAISS failed ({e}). Switching to in-memory Chroma.")
+    vector_db = Chroma.from_documents(documents, embedding, persist_directory=None)
 
 # ------------------ LLM ------------------
 text_generation_pipeline = pipeline(
