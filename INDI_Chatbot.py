@@ -1,37 +1,27 @@
-import streamlit as st
-import json
 import os
 import pickle
+import json
+import streamlit as st
 from PIL import Image
 from transformers import pipeline
-from dotenv import load_dotenv
-
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.llms import HuggingFacePipeline
 from langchain.chains import RetrievalQA
 from langchain_community.utilities import GoogleSerperAPIWrapper
 from langchain.agents import Tool
-# Load environment variables (SERPER_API_KEY etc.)
-api_key = st.secrets["SERPER_API_KEY"]
-# ------------------ Check FAISS index ------------------
+from langchain_community.llms import HuggingFacePipeline
+
+# ===================== API Key =====================
+os.environ["SERPER_API_KEY"] = "YOUR_API_KEY_HERE"  # <-- Replace with your key
+
+# ===================== Check FAISS Index =====================
 FAISS_INDEX_PATH = "faiss_index.pkl"
 if not os.path.exists(FAISS_INDEX_PATH):
-    st.error("❌ FAISS index not found. Please run ingest.py first.")
+    st.error("❌ FAISS index not found. Run ingest.py first to create it.")
     st.stop()
 
 with open(FAISS_INDEX_PATH, "rb") as f:
     vector_db = pickle.load(f)
 
-# ------------------ Check FAISS index ------------------
-FAISS_INDEX_PATH = "faiss_index.pkl"
-if not os.path.exists(FAISS_INDEX_PATH):
-    st.error("❌ FAISS index not found. Please run ingest.py first.")
-    st.stop()
-
-with open(FAISS_INDEX_PATH, "rb") as f:
-    vector_db = pickle.load(f)
-
-# ------------------ Session State ------------------
+# ===================== Session State =====================
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 if "dark_mode" not in st.session_state:
@@ -42,7 +32,7 @@ if "loading" not in st.session_state:
 def toggle_theme():
     st.session_state.dark_mode = not st.session_state.dark_mode
 
-# ------------------ User Authentication ------------------
+# ===================== Authentication =====================
 def login_page():
     st.title("🔐 Welcome to INDIBOT")
     st.markdown("---")
@@ -88,7 +78,8 @@ def login_page():
                 elif any(u['email'] == reg_email for u in users):
                     st.error("Email ID already registered. Please use another.")
                 else:
-                    users.append({"username": reg_username, "password": reg_password, "email": reg_email})
+                    user_data = {"username": reg_username, "password": reg_password, "email": reg_email}
+                    users.append(user_data)
                     with open("users.json", 'w') as f:
                         json.dump(users, f, indent=4)
                     st.success("Registration successful! You can now log in.")
@@ -97,7 +88,7 @@ if "user_logged_in" not in st.session_state:
     login_page()
     st.stop()
 
-# ------------------ LLM ------------------
+# ===================== LLM =====================
 text_generation_pipeline = pipeline(
     "text-generation",
     model="google/flan-t5-base",
@@ -108,15 +99,15 @@ text_generation_pipeline = pipeline(
 )
 llm = HuggingFacePipeline(pipeline=text_generation_pipeline)
 
-# ------------------ RAG Chain ------------------
+# ===================== Retrieval QA =====================
 qa_chain = RetrievalQA.from_chain_type(
     llm=llm,
     chain_type="stuff",
     retriever=vector_db.as_retriever(search_kwargs={"k": 3})
 )
 
-# ------------------ Web Search ------------------
-use_web_search = True
+# ===================== Web Search =====================
+use_web_search = bool(os.environ.get("SERPER_API_KEY"))
 if use_web_search:
     search = GoogleSerperAPIWrapper()
     web_search_tool = Tool(
@@ -125,7 +116,7 @@ if use_web_search:
         func=search.run
     )
 
-# ------------------ UI ------------------
+# ===================== Sidebar =====================
 st.set_page_config(page_title="INDI_Chatbot", layout="wide")
 with st.sidebar:
     try:
@@ -145,6 +136,7 @@ with st.sidebar:
         st.rerun()
     st.markdown(f"👤 Logged in as: {st.session_state.username}")
 
+# ===================== Main UI =====================
 st.title("🧠 INDIBOT - Vocal for Local 🇮🇳")
 st.markdown("Ask me anything about AI, Python, Economy or General Knowledge! ✨")
 
@@ -175,12 +167,14 @@ if st.button("Get Answer") or user_question:
                 st.warning("⚠️ Web search failed. Check SERPER_API_KEY or internet.")
                 st.error(str(e))
 
-# ------------------ Custom CSS ------------------
+# ===================== Theme CSS =====================
 if st.session_state.dark_mode:
     st.markdown("""
         <style>
         body, .stApp { background-color: #121212; color: #f0f0f0; }
         .stTextInput, .stTextArea { background-color: #333 !important; color: white; }
+        .css-1cpxqw2 { background-color: #1f1f1f !important; }
+        .element-container:has(.stSpinner) .stSpinner { color: #00FFAA; }
         </style>
     """, unsafe_allow_html=True)
 else:
