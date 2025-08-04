@@ -1,0 +1,10 @@
+streamlit
+langchain
+langchain-community
+unstructured[all-extra]
+sentence-transformers
+transformers
+langchain-chroma
+pysqlite3-binary
+python-dotenv
+google-search-results
