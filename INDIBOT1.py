@@ -3,19 +3,20 @@ import pickle
 import json
 import streamlit as st
 from PIL import Image
-from langchain.chains import RetrievalQA
+from huggingface_hub import login
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
-from langchain_community.utilities import GoogleSerperAPIWrapper
-from langchain.agents import Tool
-from huggingface_hub import login
+from langchain_community.llms import HuggingFaceHub
+from transformers import pipeline
+from langchain_community.llms import HuggingFacePipeline
 
-# ===================== API Key =====================
-# Load environment variables (SERPER_API_KEY etc.)
-api_key = st.secrets["SERPER_API_KEY"]
-
+# ===================== API Key (Hugging Face) =====================
 HF_TOKEN = os.environ.get("HUGGINGFACEHUB_API_TOKEN", st.secrets.get("HUGGINGFACEHUB_API_TOKEN"))
+if not HF_TOKEN:
+    st.error("❌ Hugging Face token is missing. Add it to .streamlit/secrets.toml")
+    st.stop()
 login(HF_TOKEN)
+
 # ===================== Check FAISS Index =====================
 FAISS_INDEX_PATH = "faiss_index.pkl"
 if not os.path.exists(FAISS_INDEX_PATH):
@@ -92,32 +93,22 @@ if "user_logged_in" not in st.session_state:
     login_page()
     st.stop()
 
-# ===================== LLM =====================
-from langchain_community.llms import HuggingFaceHub
-
-llm = HuggingFaceHub(
-    repo_id="mistralai/Mistral-7B-Instruct-v0.1",
-    huggingfacehub_api_token=HF_TOKEN,
-    model_kwargs={"temperature": 0.7, "max_new_tokens": 512}
+# ===================== LLM (Hugging Face Hub) =====================
+text_generation_pipeline = pipeline(
+    "text2text-generation",  # For FLAN-T5
+    model="google/flan-t5-base",
+    max_new_tokens=256,
+    temperature=0.7
 )
+llm = HuggingFacePipeline(pipeline=text_generation_pipeline)
 
-# ===================== Retrieval QA =====================
+# ===================== Retrieval QA (with conversation memory) =====================
 memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
 qa_chain = ConversationalRetrievalChain.from_llm(
     llm,
     retriever=vector_db.as_retriever(search_kwargs={"k": 3}),
     memory=memory
 )
-
-# ===================== Web Search =====================
-use_web_search = bool(os.environ.get("SERPER_API_KEY"))
-if use_web_search:
-    search = GoogleSerperAPIWrapper()
-    web_search_tool = Tool(
-        name="Google Search",
-        description="Search the web for current information",
-        func=search.run
-    )
 
 # ===================== Sidebar =====================
 st.set_page_config(page_title="INDI_Chatbot", layout="wide")
@@ -140,7 +131,7 @@ with st.sidebar:
     st.markdown(f"👤 Logged in as: {st.session_state.username}")
 
 # ===================== Main UI =====================
-st.title("🧠 INDIBOT - Vocal for Local 🇮🇳")
+st.title("🧠 INDIBOT (Vocal for Local)")
 st.markdown("Ask me anything about AI, Python, Economy or General Knowledge! ✨")
 
 user_question = st.text_input("🎤 Ask your question:", placeholder="Type your query here...")
@@ -161,14 +152,6 @@ if st.button("Get Answer") or user_question:
             except Exception as e:
                 st.session_state.loading = False
                 st.error(f"❌ Local QA failed: {e}")
-        if use_web_search:
-            try:
-                web_result = web_search_tool.run(user_question)
-                st.markdown("### 🌐 Web Search Result")
-                st.info(web_result)
-            except Exception as e:
-                st.warning("⚠️ Web search failed. Check SERPER_API_KEY or internet.")
-                st.error(str(e))
 
 # ===================== Theme CSS =====================
 if st.session_state.dark_mode:
