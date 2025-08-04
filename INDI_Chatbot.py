@@ -3,8 +3,15 @@ import os
 import json
 import time
 from PIL import Image
-# Made by Shivam Singh Bhadoriya
-# LangChain imports
+# Add this code at the very top of your script
+__import__('pysqlite3')
+import sys
+sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+
+# Now your existing imports can follow
+from langchain_chroma import Chroma
+from langchain_community.embeddings import HuggingFaceEmbeddings
+
 from langchain_chroma import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.llms import HuggingFacePipeline
