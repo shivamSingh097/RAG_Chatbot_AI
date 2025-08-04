@@ -3,13 +3,11 @@ import pickle
 import json
 import streamlit as st
 from PIL import Image
-from transformers import pipeline
 from langchain.chains import RetrievalQA
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
 from langchain_community.utilities import GoogleSerperAPIWrapper
 from langchain.agents import Tool
-from langchain_community.llms import HuggingFacePipeline
 from huggingface_hub import login
 
 # ===================== API Key =====================
@@ -95,17 +93,13 @@ if "user_logged_in" not in st.session_state:
     st.stop()
 
 # ===================== LLM =====================
-from langchain_community.llms import HuggingFacePipeline
+from langchain_community.llms import HuggingFaceHub
 
-text_generation_pipeline = pipeline(
-    "text-generation",
-    model="mistralai/Mistral-7B-Instruct-v0.1",
-    trust_remote_code=True,
-    max_new_tokens=512,
-    temperature=0.7,
-    device_map="auto"
+llm = HuggingFaceHub(
+    repo_id="mistralai/Mistral-7B-Instruct-v0.1",
+    huggingfacehub_api_token=HF_TOKEN,
+    model_kwargs={"temperature": 0.7, "max_new_tokens": 512}
 )
-llm = HuggingFacePipeline(pipeline=text_generation_pipeline)
 
 # ===================== Retrieval QA =====================
 memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
