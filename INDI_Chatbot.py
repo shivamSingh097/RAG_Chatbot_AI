@@ -4,7 +4,7 @@ import os
 from dotenv import load_dotenv
 
 # These two lines must be at the very top to fix the pysqlite3 error
-__import__('pysqlite3')
+import sqlite3
 import sys
 sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 
