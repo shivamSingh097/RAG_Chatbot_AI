@@ -11,7 +11,8 @@ from langchain_community.llms import HuggingFacePipeline
 from langchain.chains import RetrievalQA
 from langchain_community.utilities import GoogleSerperAPIWrapper
 from langchain.agents import Tool
-load_dotenv()
+# Load environment variables (SERPER_API_KEY etc.)
+api_key = st.secrets["SERPER_API_KEY"]
 # ------------------ Check FAISS index ------------------
 FAISS_INDEX_PATH = "faiss_index.pkl"
 if not os.path.exists(FAISS_INDEX_PATH):
