@@ -6,5 +6,6 @@ torch
 langchain
 langchain-community
 faiss-cpu
-google-search-results
 chromadb
+sentence-transformers
+google-search-results
