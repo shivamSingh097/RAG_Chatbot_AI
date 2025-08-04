@@ -4,6 +4,7 @@ langchain-community
 unstructured[all-extra]
 sentence-transformers
 transformers
-pysqlite3-binary  # This must be in the file
+langchain-chroma
+pysqlite3-binary
 python-dotenv
 google-search-results
