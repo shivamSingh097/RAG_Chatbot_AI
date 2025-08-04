@@ -2,25 +2,26 @@ import streamlit as st
 import json
 import os
 from dotenv import load_dotenv
-# These two lines must be at the very top to fix the pysqlite3 error
 import sqlite3
 import sys
-# Core LangChain imports for RAG
+from PIL import Image
+from transformers import pipeline
+
+# LangChain core components
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.llms import HuggingFacePipeline
 from langchain.chains import RetrievalQA
-# Imports for web search
+from langchain.vectorstores import FAISS
 from langchain_community.utilities import GoogleSerperAPIWrapper
 from langchain.agents import Tool
-from langchain.prompts import PromptTemplate
-# Hugging Face pipeline for the local LLM
-from transformers import pipeline
+from langchain.document_loaders import TextLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 
-from langchain.vectorstores import FAISS
-# Example usage
-vectorstore = FAISS.from_documents(documents, embeddings)
-# Load environment variables (SERPER_API_KEY etc.)
-api_key = st.secrets["SERPER_API_KEY"]
+# --- Load environment variables ---
+load_dotenv()
+
+# --- Load SERPER API Key from secrets ---
+api_key = os.getenv("SERPER_API_KEY") or st.secrets["SERPER_API_KEY"]
 
 # --- Session State ---
 if "chat_history" not in st.session_state:
@@ -36,10 +37,8 @@ def toggle_theme():
 
 # --- User Authentication Page ---
 def login_page():
-
     st.title("🔐 Welcome to INDIBOT")
     st.markdown("---")
-
     tab1, tab2 = st.tabs(["Login", "Register"])
 
     with tab1:
@@ -96,40 +95,37 @@ def login_page():
 
                     st.success("Registration successful! You can now log in.")
 
- #   with tab2:
- #       new_username = st.text_input("Create Username")
- #       new_password = st.text_input("Create Password", type="password")
- #       if st.button("Create Account"):
- #           st.success("Account created. Please login.")
-
 if "user_logged_in" not in st.session_state:
     login_page()
     st.stop()
 
-# --- Set up embedding model and vector store ---
-DB_PATH = "chroma_db/"
-embedding = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-vector_db = Chroma(persist_directory=DB_PATH, embedding_function=embedding)
+# --- Vector Store Setup (FAISS + HuggingFace) ---
+loader = TextLoader("data.txt")
+raw_docs = loader.load()
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+documents = text_splitter.split_documents(raw_docs)
+embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+vectorstore = FAISS.from_documents(documents, embeddings)
 
-# --- Set up a small LLM for text generation ---
+# --- LLM Setup (HuggingFace FLAN-T5) ---
 text_generation_pipeline = pipeline(
     "text-generation",
     model="google/flan-t5-base",
     device=-1,
-    max_new_tokens=512,
+    max_new_tokens=256,
     do_sample=True,
-    temperature=0.7,
+    temperature=0.7
 )
 llm = HuggingFacePipeline(pipeline=text_generation_pipeline)
 
-# --- Build Retrieval-Augmented Generation (RAG) Chain ---
+# --- RetrievalQA Chain Setup ---
 qa_chain = RetrievalQA.from_chain_type(
     llm=llm,
     chain_type="stuff",
-    retriever=vector_db.as_retriever(search_kwargs={"k": 3})
+    retriever=vectorstore.as_retriever(search_kwargs={"k": 3})
 )
 
-# --- Optional: Set up Google Serper API Tool ---
+# --- Web Search (Optional) ---
 use_web_search = True
 if use_web_search:
     search = GoogleSerperAPIWrapper()
@@ -139,7 +135,7 @@ if use_web_search:
         func=search.run
     )
 
-# --- Layout & Style ---
+# --- UI Setup ---
 st.set_page_config(page_title="INDI_Chatbot", layout="wide")
 
 with st.sidebar:
@@ -147,11 +143,11 @@ with st.sidebar:
         logo = Image.open("INDIBOT.png")
         st.image(logo, width=100)
     except:
-        st.markdown("⚠️ Add 'chatbot_logo.png' in your project folder.")
+        st.markdown("⚠️ Add 'INDIBOT.png' in your project folder.")
 
     st.title("📚 Chat History")
     for msg in reversed(st.session_state.chat_history):
-        st.markdown(f"- 💬 {msg['query'][:30]}")
+        st.markdown(f"- 💬 {msg['query'][:30]}...")
 
     if st.button("🆕 New Chat"):
         st.session_state.chat_history.clear()
@@ -176,9 +172,8 @@ if st.button("Get Answer") or user_question:
                 local_answer = qa_chain.run(user_question)
                 st.session_state.loading = False
 
-                # --- Chat Message UI ---
-                st.chat_message("user").write(user_question)
-                st.chat_message("ai").write(local_answer)
+                st.chat_message("user", avatar="👤").write(user_question)
+                st.chat_message("ai", avatar="🤖").write(local_answer)
 
                 st.session_state.chat_history.append({
                     "user": st.session_state.username,
@@ -206,6 +201,7 @@ if st.session_state.dark_mode:
         body, .stApp { background-color: #121212; color: #f0f0f0; }
         .stTextInput, .stTextArea { background-color: #333 !important; color: white; }
         .css-1cpxqw2 { background-color: #1f1f1f !important; }
+        .element-container:has(.stSpinner) .stSpinner { color: #00FFAA; }
         </style>
     """, unsafe_allow_html=True)
 else:
