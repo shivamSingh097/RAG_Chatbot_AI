@@ -1,10 +1,10 @@
 streamlit
-langchain
-faiss-cpu
-openai
+pillow
 python-dotenv
-<<<<<<< HEAD
-tiktoken
-=======
-tiktoken
->>>>>>> 817256bdca6d0823bb94447e4ee7089169b5053a
+transformers
+torch
+langchain
+langchain-community
+faiss-cpu
+google-search-results
+chromadb
