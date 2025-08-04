@@ -94,7 +94,7 @@ if "user_logged_in" not in st.session_state:
 # ===================== LLM =====================
 text_generation_pipeline = pipeline(
     "text-generation",
-    model="mistralai/Mistral-7B-Instruct-v0.1",
+    model="meta-llama/Meta-Llama-3.1-8B-Instruct",
     trust_remote_code=True,
     max_new_tokens=512,
     temperature=0.7,
