@@ -10,7 +10,8 @@ from langchain.agents import Tool
 from langchain_community.llms import HuggingFacePipeline
 
 # ===================== API Key =====================
-os.environ["SERPER_API_KEY"] = "YOUR_API_KEY_HERE"  # <-- Replace with your key
+# Load environment variables (SERPER_API_KEY etc.)
+api_key = st.secrets["SERPER_API_KEY"]
 
 # ===================== Check FAISS Index =====================
 FAISS_INDEX_PATH = "faiss_index.pkl"
