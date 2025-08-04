@@ -1,148 +1,188 @@
-import streamlit as st
 import os
-from dotenv import load_dotenv
-
-# LangChain imports
-from langchain_community.vectorstores import Chroma
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.llms import HuggingFacePipeline
+import pickle
+import json
+import streamlit as st
+from PIL import Image
 from langchain.chains import RetrievalQA
-from langchain.prompts import PromptTemplate
-from langchain_chroma import Chroma
-
-# Web Search
+from langchain.chains import ConversationalRetrievalChain
+from langchain.memory import ConversationBufferMemory
 from langchain_community.utilities import GoogleSerperAPIWrapper
 from langchain.agents import Tool
+from huggingface_hub import login
 
-# Transformers
-from transformers import pipeline
-import re
+# ===================== API Key =====================
+# Load environment variables (SERPER_API_KEY etc.)
+api_key = st.secrets["SERPER_API_KEY"]
 
-# Load environment variables
-load_dotenv()
+HF_TOKEN = os.environ.get("HUGGINGFACEHUB_API_TOKEN", st.secrets.get("HUGGINGFACEHUB_API_TOKEN"))
+login(HF_TOKEN)
+# ===================== Check FAISS Index =====================
+FAISS_INDEX_PATH = "faiss_index.pkl"
+if not os.path.exists(FAISS_INDEX_PATH):
+    st.error("❌ FAISS index not found. Run ingest.py first to create it.")
+    st.stop()
 
-# --- Set up embedding model and vector store ---
-DB_PATH = "chroma_db/"
-embedding = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-vector_db = Chroma(persist_directory=DB_PATH, embedding_function=embedding)
+with open(FAISS_INDEX_PATH, "rb") as f:
+    vector_db = pickle.load(f)
 
-# --- Set up LLM ---
-text_generation_pipeline = pipeline(
-    "text2text-generation",
-    model="google/flan-t5-base",
-    device=-1,
-    max_new_tokens=100,
-    temperature=0.7,
+# ===================== Session State =====================
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+if "dark_mode" not in st.session_state:
+    st.session_state.dark_mode = True
+if "loading" not in st.session_state:
+    st.session_state.loading = False
+
+def toggle_theme():
+    st.session_state.dark_mode = not st.session_state.dark_mode
+
+# ===================== Authentication =====================
+def login_page():
+    st.title("🔐 Welcome to INDIBOT")
+    st.markdown("---")
+    tab1, tab2 = st.tabs(["Login", "Register"])
+
+    with tab1:
+        st.subheader("Login to your account")
+        username = st.text_input("Username", key="login_username")
+        password = st.text_input("Password", type="password", key="login_password")
+        if st.button("Login", key="login_button"):
+            if not username or not password:
+                st.error("Please enter both username and password.")
+            else:
+                try:
+                    with open("users.json", 'r') as f:
+                        users = json.load(f)
+                    user_found = any(u['username'] == username and u['password'] == password for u in users)
+                    if user_found:
+                        st.session_state.user_logged_in = True
+                        st.session_state.username = username
+                        st.rerun()
+                    else:
+                        st.error("Invalid username or password.")
+                except FileNotFoundError:
+                    st.error("No registered users found. Please register first.")
+
+    with tab2:
+        st.subheader("Create a new account")
+        reg_username = st.text_input("Username", key="reg_username")
+        reg_password = st.text_input("Password", type="password", key="reg_password")
+        reg_email = st.text_input("Email ID", key="reg_email")
+        if st.button("Register", key="register_button"):
+            if not reg_username or not reg_password or not reg_email:
+                st.error("Username, password, and email are compulsory.")
+            else:
+                if not os.path.exists("users.json"):
+                    with open("users.json", "w") as f:
+                        json.dump([], f)
+                with open("users.json", 'r') as f:
+                    users = json.load(f)
+                if any(u['username'] == reg_username for u in users):
+                    st.error("Username already exists. Please choose another.")
+                elif any(u['email'] == reg_email for u in users):
+                    st.error("Email ID already registered. Please use another.")
+                else:
+                    user_data = {"username": reg_username, "password": reg_password, "email": reg_email}
+                    users.append(user_data)
+                    with open("users.json", 'w') as f:
+                        json.dump(users, f, indent=4)
+                    st.success("Registration successful! You can now log in.")
+
+if "user_logged_in" not in st.session_state:
+    login_page()
+    st.stop()
+
+# ===================== LLM =====================
+from langchain_community.llms import HuggingFaceHub
+
+llm = HuggingFaceHub(
+    repo_id="mistralai/Mistral-7B-Instruct-v0.1",
+    huggingfacehub_api_token=HF_TOKEN,
+    model_kwargs={"temperature": 0.7, "max_new_tokens": 512}
 )
-llm = HuggingFacePipeline(pipeline=text_generation_pipeline)
 
-# --- Custom Prompt for short answer ---
-custom_prompt = PromptTemplate(
-    input_variables=["context", "question"],
-    template="""
-You are an intelligent assistant. Use the context below to answer the question in one or two precise sentences.
-Avoid extra explanation or unrelated facts.
-
-Context:
-{context}
-
-Question: {question}
-Answer:
-"""
-)
-
-qa_chain = RetrievalQA.from_chain_type(
-    llm=llm,
+# ===================== Retrieval QA =====================
+memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+qa_chain = ConversationalRetrievalChain.from_llm(
+    llm,
     retriever=vector_db.as_retriever(search_kwargs={"k": 3}),
-    chain_type="stuff",
-    chain_type_kwargs={"prompt": custom_prompt}
+    memory=memory
 )
 
-# --- Google Search Tool ---
-use_web_search = True
+# ===================== Web Search =====================
+use_web_search = bool(os.environ.get("SERPER_API_KEY"))
 if use_web_search:
     search = GoogleSerperAPIWrapper()
     web_search_tool = Tool(
         name="Google Search",
-        description="A tool to search the web for information.",
+        description="Search the web for current information",
         func=search.run
     )
 
-# --- Streamlit UI Config ---
-st.set_page_config(page_title="INDI_Chatbot", page_icon="🤖", layout="centered")
-
-# --- Custom CSS ---
-st.markdown("""
-<style>
-body {
-    background-color: #0f1116;
-    color: #ffffff;
-}
-[data-testid="stAppViewContainer"] {
-    background: linear-gradient(135deg, #1c1e26, #2a2d3e);
-}
-h1, h2, h3 {
-    color: #00c8ff;
-}
-input, textarea {
-    background-color: #1a1a1a !important;
-    color: white !important;
-}
-.stTextInput>div>div>input {
-    border: 2px solid #00c8ff;
-    border-radius: 12px;
-    padding: 0.75rem;
-}
-.stButton>button {
-    background-color: #00c8ff;
-    color: black;
-    font-weight: bold;
-    border-radius: 10px;
-}
-.message-bubble {
-    padding: 1rem;
-    border-radius: 12px;
-    background-color: #1e1f25;
-    margin: 10px 0;
-    color: white;
-    font-size: 1.1rem;
-}
-.success-bubble {
-    border-left: 5px solid #00c8ff;
-}
-.info-bubble {
-    border-left: 5px solid #00ffa1;
-}
-</style>
-""", unsafe_allow_html=True)
-
-# --- App Header ---
-st.title("🧠 INDI_Chatbot (Vocal for Local)")
-st.markdown("Ask any question. Get quick, point-to-point answers from AI & Web.")
-
-# --- Input ---
-user_question = st.text_input("❓ Ask your question here:", placeholder="e.g. When was Steve Jobs born?")
-
-if user_question:
-    # --- Local Answer ---
-    st.markdown("#### 🤖 From Local Knowledge Base")
+# ===================== Sidebar =====================
+st.set_page_config(page_title="INDI_Chatbot", layout="wide")
+with st.sidebar:
     try:
-        local_answer = qa_chain.run(user_question).strip()
-        if local_answer:
-            st.markdown(f"<div class='message-bubble success-bubble'>{local_answer}</div>", unsafe_allow_html=True)
-        else:
-            st.warning("No relevant answer found in local knowledge base.")
-    except Exception as e:
-        st.error(f"Local QA failed: {e}")
+        logo = Image.open("INDIBOT.png")
+        st.image(logo, width=100)
+    except:
+        st.markdown("⚠️ Add 'INDIBOT.png' in your project folder.")
+    st.title("📚 Chat History")
+    for msg in reversed(st.session_state.chat_history):
+        st.markdown(f"- 💬 {msg['query'][:30]}...")
+    if st.button("🆕 New Chat"):
+        st.session_state.chat_history.clear()
+        st.rerun()
+    st.markdown("---")
+    if st.button("🌓 Toggle Theme"):
+        toggle_theme()
+        st.rerun()
+    st.markdown(f"👤 Logged in as: {st.session_state.username}")
 
-    # --- Web Answer ---
-    if use_web_search:
-        st.markdown("#### 🌐 From Web Search")
-        try:
-            web_result = web_search_tool.run(user_question)
-            sentences = re.split(r'(?<=[.!?])\s+', web_result.strip())
-            short_answer = sentences[0] if sentences else web_result
-            st.markdown(f"<div class='message-bubble info-bubble'>{short_answer}</div>", unsafe_allow_html=True)
-        except Exception as e:
-            st.warning("Web search failed. Check SERPER_API_KEY or internet.")
-            st.error(str(e))
+# ===================== Main UI =====================
+st.title("🧠 INDIBOT - Vocal for Local 🇮🇳")
+st.markdown("Ask me anything about AI, Python, Economy or General Knowledge! ✨")
+
+user_question = st.text_input("🎤 Ask your question:", placeholder="Type your query here...")
+if st.button("Get Answer") or user_question:
+    if user_question:
+        st.session_state.loading = True
+        with st.spinner("🔄 Thinking..."):
+            try:
+                local_answer = qa_chain.run(user_question)
+                st.session_state.loading = False
+                st.chat_message("user", avatar="👤").write(user_question)
+                st.chat_message("ai", avatar="🤖").write(local_answer)
+                st.session_state.chat_history.append({
+                    "user": st.session_state.username,
+                    "query": user_question,
+                    "answer": local_answer
+                })
+            except Exception as e:
+                st.session_state.loading = False
+                st.error(f"❌ Local QA failed: {e}")
+        if use_web_search:
+            try:
+                web_result = web_search_tool.run(user_question)
+                st.markdown("### 🌐 Web Search Result")
+                st.info(web_result)
+            except Exception as e:
+                st.warning("⚠️ Web search failed. Check SERPER_API_KEY or internet.")
+                st.error(str(e))
+
+# ===================== Theme CSS =====================
+if st.session_state.dark_mode:
+    st.markdown("""
+        <style>
+        body, .stApp { background-color: #121212; color: #f0f0f0; }
+        .stTextInput, .stTextArea { background-color: #333 !important; color: white; }
+        .css-1cpxqw2 { background-color: #1f1f1f !important; }
+        .element-container:has(.stSpinner) .stSpinner { color: #00FFAA; }
+        </style>
+    """, unsafe_allow_html=True)
+else:
+    st.markdown("""
+        <style>
+        body, .stApp { background-color: #ffffff; color: #000000; }
+        </style>
+    """, unsafe_allow_html=True)
