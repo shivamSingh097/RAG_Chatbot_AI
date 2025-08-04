@@ -1,31 +1,25 @@
 import streamlit as st
 import json
 import os
+import pickle
 from PIL import Image
 from transformers import pipeline
 from dotenv import load_dotenv
 
-# LangChain components
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.llms import HuggingFacePipeline
 from langchain.chains import RetrievalQA
-from langchain_community.vectorstores import FAISS, Chroma
-from langchain_community.document_loaders import TextLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.utilities import GoogleSerperAPIWrapper
 from langchain.agents import Tool
 
-# ------------------ File Check ------------------
-file_path = "/docs"
-if not os.path.exists(file_path):
-    st.error("❌ 'data.txt' not found. Please upload it to the root directory.")
+# ------------------ Check FAISS index ------------------
+FAISS_INDEX_PATH = "faiss_index.pkl"
+if not os.path.exists(FAISS_INDEX_PATH):
+    st.error("❌ FAISS index not found. Please run ingest.py first.")
     st.stop()
 
-loader = TextLoader(file_path)
-raw_docs = loader.load()
-if not raw_docs:
-    st.error("❌ No content found in data.txt.")
-    st.stop()
+with open(FAISS_INDEX_PATH, "rb") as f:
+    vector_db = pickle.load(f)
 
 # ------------------ Session State ------------------
 if "chat_history" not in st.session_state:
@@ -93,18 +87,6 @@ if "user_logged_in" not in st.session_state:
     login_page()
     st.stop()
 
-# ------------------ Embeddings ------------------
-embedding = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-documents = text_splitter.split_documents(raw_docs)
-
-# ------------------ VectorDB (FAISS primary, Chroma fallback) ------------------
-try:
-    vector_db = FAISS.from_documents(documents, embedding)
-except Exception as e:
-    st.warning(f"FAISS failed ({e}). Switching to in-memory Chroma.")
-    vector_db = Chroma.from_documents(documents, embedding, persist_directory=None)
-
 # ------------------ LLM ------------------
 text_generation_pipeline = pipeline(
     "text-generation",
@@ -123,7 +105,7 @@ qa_chain = RetrievalQA.from_chain_type(
     retriever=vector_db.as_retriever(search_kwargs={"k": 3})
 )
 
-# ------------------ Web Search (Optional) ------------------
+# ------------------ Web Search ------------------
 use_web_search = True
 if use_web_search:
     search = GoogleSerperAPIWrapper()
