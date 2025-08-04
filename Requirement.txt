@@ -1,9 +1,0 @@
-streamlit
-langchain
-langchain-community
-unstructured[all-extra]
-sentence-transformers
-transformers
-chromadb
-python-dotenv
-google-search-results

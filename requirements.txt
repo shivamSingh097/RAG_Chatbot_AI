@@ -1,9 +1,6 @@
 streamlit
 langchain
-langchain-community
-unstructured[all-extra]
-sentence-transformers
-transformers
-chromadb
+faiss-cpu
+openai
 python-dotenv
-google-search-results
+tiktoken
