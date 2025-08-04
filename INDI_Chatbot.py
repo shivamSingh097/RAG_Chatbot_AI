@@ -5,6 +5,8 @@ import streamlit as st
 from PIL import Image
 from transformers import pipeline
 from langchain.chains import RetrievalQA
+from langchain.chains import ConversationalRetrievalChain
+from langchain.memory import ConversationBufferMemory
 from langchain_community.utilities import GoogleSerperAPIWrapper
 from langchain.agents import Tool
 from langchain_community.llms import HuggingFacePipeline
@@ -92,19 +94,20 @@ if "user_logged_in" not in st.session_state:
 # ===================== LLM =====================
 text_generation_pipeline = pipeline(
     "text-generation",
-    model="google/flan-t5-base",
-    device=-1,
-    max_new_tokens=256,
-    do_sample=True,
-    temperature=0.5
+    model="mistralai/Mistral-7B-Instruct-v0.1",
+    trust_remote_code=True,
+    max_new_tokens=512,
+    temperature=0.7,
+    device_map="auto"   # uses CPU on Streamlit Cloud
 )
 llm = HuggingFacePipeline(pipeline=text_generation_pipeline)
 
 # ===================== Retrieval QA =====================
-qa_chain = RetrievalQA.from_chain_type(
-    llm=llm,
-    chain_type="stuff",
-    retriever=vector_db.as_retriever(search_kwargs={"k": 3})
+memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+qa_chain = ConversationalRetrievalChain.from_llm(
+    llm,
+    retriever=vector_db.as_retriever(search_kwargs={"k": 3}),
+    memory=memory
 )
 
 # ===================== Web Search =====================
