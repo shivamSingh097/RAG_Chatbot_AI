@@ -96,7 +96,7 @@ text_generation_pipeline = pipeline(
     device=-1,
     max_new_tokens=256,
     do_sample=True,
-    temperature=0.7
+    temperature=0.5
 )
 llm = HuggingFacePipeline(pipeline=text_generation_pipeline)
 
