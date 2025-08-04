@@ -144,7 +144,7 @@ with st.sidebar:
     st.markdown(f"👤 Logged in as: {st.session_state.username}")
 
 # ===================== Main UI =====================
-st.title("🧠 INDIBOT (Vocal for Local)")
+st.title("🧠 INDIBOT")
 st.markdown("Ask me anything about AI, Python, Economy, General Knowledge or Live Web Search! ✨")
 
 user_question = st.text_input("🎤 Ask your question:", placeholder="Type your query here...")
