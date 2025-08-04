@@ -95,7 +95,9 @@ if "user_logged_in" not in st.session_state:
     st.stop()
 
 # ===================== LLM =====================
-text_generation_pipeline = pipe = pipeline(
+from langchain_community.llms import HuggingFacePipeline
+
+text_generation_pipeline = pipeline(
     "text-generation",
     model="mistralai/Mistral-7B-Instruct-v0.1",
     trust_remote_code=True,
@@ -103,6 +105,7 @@ text_generation_pipeline = pipe = pipeline(
     temperature=0.7,
     device_map="auto"
 )
+llm = HuggingFacePipeline(pipeline=text_generation_pipeline)
 
 # ===================== Retrieval QA =====================
 memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
