@@ -16,6 +16,9 @@ except OSError:
     nlp = spacy.blank("en")
 from spacy.cli import download as spacy_download
 from textblob import TextBlob
+def get_sentiment(text):
+    blob = TextBlob(text)
+    return blob.sentiment.polarity
 from sentence_transformers import SentenceTransformer, util
 import numpy as np
 from gtts import gTTS
