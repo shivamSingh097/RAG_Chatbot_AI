@@ -9,7 +9,9 @@ from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
 from langchain_community.llms import HuggingFacePipeline
 from langchain_community.utilities import GoogleSerperAPIWrapper
-from langchain.agents import Tool
+from langchain.agents import Tool, initialize_agent
+from langchain.tools import WikipediaQueryRun
+from langchain_community.utilities import WikipediaAPIWrapper
 from datetime import datetime
 
 # ===================== API Keys & Configuration =====================
@@ -83,7 +85,6 @@ def load_chat(chat_id):
 
 # ===================== Authentication =====================
 def login_page():
-    # Your existing login_page function...
     st.title("🔐 Welcome to INDIBOT")
     st.markdown("---")
     tab1, tab2 = st.tabs(["Login", "Register"])
@@ -140,26 +141,40 @@ if "user_logged_in" not in st.session_state or not st.session_state.user_logged_
 text_generation_pipeline = pipeline(
     "text2text-generation",
     model="google/flan-t5-base",
-    max_new_tokens=256,
+    max_new_tokens=1024,  # Increased token count for longer output
     temperature=0.7
 )
 llm = HuggingFacePipeline(pipeline=text_generation_pipeline)
 
-memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
-qa_chain = ConversationalRetrievalChain.from_llm(
+# Use a tool-based agent to decide between Wikipedia and local search
+wikipedia = WikipediaQueryRun(api_wrapper=WikipediaAPIWrapper())
+local_qa = ConversationalRetrievalChain.from_llm(
     llm,
     retriever=vector_db.as_retriever(search_kwargs={"k": 3}),
-    memory=memory
+    memory=ConversationBufferMemory(memory_key="chat_history", return_messages=True)
 )
 
-use_web_search = bool(SERPER_API_KEY)
-if use_web_search:
-    search = GoogleSerperAPIWrapper(serper_api_key=SERPER_API_KEY)
-    web_search_tool = Tool(
-        name="Google Search",
-        description="Fetch real-time web search results",
-        func=search.run
+tools = [
+    Tool(
+        name="Local QA",
+        func=local_qa.run,
+        description="""Useful for answering questions about AI, Python, Economy, and general knowledge from local documents. 
+        Input should be a standalone question."""
+    ),
+    Tool(
+        name="Wikipedia Search",
+        func=wikipedia.run,
+        description="""Useful for answering a wide range of questions by searching on Wikipedia. 
+        Input should be a standalone query."""
     )
+]
+
+agent = initialize_agent(
+    tools,
+    llm,
+    agent="zero-shot-react-description",
+    verbose=True
+)
 
 # ===================== Sidebar =====================
 st.set_page_config(page_title="INDIBOT AI", layout="wide")
@@ -219,31 +234,18 @@ if user_question := st.chat_input("🎤 Ask your question..."):
                 break
 
     if not found_in_history:
-        with st.spinner("🔄 Checking local documents..."):
+        with st.spinner("🔄 Thinking..."):
             try:
-                local_answer = qa_chain.run(user_question)
-                st.session_state.messages.append({"role": "assistant", "content": local_answer})
+                # Use the agent to decide whether to use local QA or Wikipedia
+                response = agent.run(user_question)
+                st.session_state.messages.append({"role": "assistant", "content": response})
                 with st.chat_message("assistant"):
-                    st.markdown(local_answer)
+                    st.markdown(response)
                 
-                # Save the new conversation to the history file
                 if st.session_state.current_chat_id is None:
                     st.session_state.current_chat_id = str(datetime.now().timestamp())
-                save_chat_history(st.session_state.current_chat_id, user_question, local_answer)
+                save_chat_history(st.session_state.current_chat_id, user_question, response)
                 
             except Exception as e:
-                st.error(f"❌ Local QA failed: {e}")
-                
-        # ============ Run Web Search if API available and local QA failed or was unhelpful ============
-        if use_web_search and "i don't know" in local_answer.lower():
-            with st.spinner("🌐 Performing web search..."):
-                try:
-                    web_result = web_search_tool.run(user_question)
-                    final_answer = f"### 🌐 Web Search Result\n{web_result}"
-                    st.session_state.messages.append({"role": "assistant", "content": final_answer})
-                    with st.chat_message("assistant"):
-                        st.markdown(final_answer)
-                except Exception as e:
-                    st.warning("⚠️ Web search failed.")
-                    st.error(str(e))
+                st.error(f"❌ An error occurred: {e}")
     st.rerun()
