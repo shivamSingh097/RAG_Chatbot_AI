@@ -45,13 +45,12 @@ with open(FAISS_INDEX_PATH, "rb") as f:
     vector_db = pickle.load(f)
 
 # ---------------- SpaCy Model ----------------
-try:
-    nlp = spacy.load("en_core_web_sm")
-except OSError:
-    spacy_download("en_core_web_sm")
-    nlp = spacy.load("en_core_web_sm")
-
-intent_model = SentenceTransformer("all-MiniLM-L6-v2")
+import importlib.util
+if importlib.util.find_spec("en_core_web_sm") is None:
+    from spacy.cli import download
+    download("en_core_web_sm")
+import en_core_web_sm
+nlp = en_core_web_sm.load()
 
 # ---------------- Intents ----------------
 INTENT_RESPONSES = {
