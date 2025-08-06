@@ -10,8 +10,9 @@ from langchain.memory import ConversationBufferMemory
 from langchain_community.llms import HuggingFacePipeline
 from langchain_community.utilities import GoogleSerperAPIWrapper
 from langchain.agents import Tool
+from datetime import datetime
 
-# ===================== API Keys =====================
+# ===================== API Keys & Configuration =====================
 HF_TOKEN = os.environ.get("HUGGINGFACEHUB_API_TOKEN", st.secrets.get("HUGGINGFACEHUB_API_TOKEN"))
 if not HF_TOKEN:
     st.error("❌ Hugging Face token is missing. Add it to .streamlit/secrets.toml")
@@ -29,23 +30,63 @@ if not os.path.exists(FAISS_INDEX_PATH):
 with open(FAISS_INDEX_PATH, "rb") as f:
     vector_db = pickle.load(f)
 
-# ===================== Session State =====================
+# ===================== Session State & Chat History Management =====================
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
-if "dark_mode" not in st.session_state:
-    st.session_state.dark_mode = True
-if "loading" not in st.session_state:
-    st.session_state.loading = False
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "current_chat_id" not in st.session_state:
+    st.session_state.current_chat_id = None
+if "username" not in st.session_state:
+    st.session_state.username = "Guest"
 
-def toggle_theme():
-    st.session_state.dark_mode = not st.session_state.dark_mode
+CHAT_HISTORY_FILE = "chat_history.json"
+
+def save_chat_history(chat_id, user_message, ai_message):
+    history = []
+    if os.path.exists(CHAT_HISTORY_FILE):
+        with open(CHAT_HISTORY_FILE, "r") as f:
+            history = json.load(f)
+    
+    chat_found = False
+    for chat in history:
+        if chat["id"] == chat_id:
+            chat["conversation"].append({"user": user_message, "ai": ai_message})
+            chat["last_updated"] = datetime.now().isoformat()
+            chat_found = True
+            break
+            
+    if not chat_found:
+        history.append({
+            "id": chat_id,
+            "title": user_message[:30] + "...",
+            "last_updated": datetime.now().isoformat(),
+            "conversation": [{"user": user_message, "ai": ai_message}]
+        })
+        
+    with open(CHAT_HISTORY_FILE, "w") as f:
+        json.dump(history, f, indent=4)
+        
+def load_chat(chat_id):
+    if os.path.exists(CHAT_HISTORY_FILE):
+        with open(CHAT_HISTORY_FILE, "r") as f:
+            history = json.load(f)
+        for chat in history:
+            if chat["id"] == chat_id:
+                st.session_state.messages = []
+                for msg in chat["conversation"]:
+                    st.session_state.messages.append({"role": "user", "content": msg["user"]})
+                    st.session_state.messages.append({"role": "assistant", "content": msg["ai"]})
+                st.session_state.current_chat_id = chat_id
+                st.session_state.chat_history = chat["conversation"]
+                st.rerun()
 
 # ===================== Authentication =====================
 def login_page():
+    # Your existing login_page function...
     st.title("🔐 Welcome to INDIBOT")
     st.markdown("---")
     tab1, tab2 = st.tabs(["Login", "Register"])
-
     with tab1:
         st.subheader("Login to your account")
         username = st.text_input("Username", key="login_username")
@@ -66,7 +107,6 @@ def login_page():
                         st.error("Invalid username or password.")
                 except FileNotFoundError:
                     st.error("No registered users found. Please register first.")
-
     with tab2:
         st.subheader("Create a new account")
         reg_username = st.text_input("Username", key="reg_username")
@@ -92,20 +132,19 @@ def login_page():
                         json.dump(users, f, indent=4)
                     st.success("Registration successful! You can now log in.")
 
-if "user_logged_in" not in st.session_state:
+if "user_logged_in" not in st.session_state or not st.session_state.user_logged_in:
     login_page()
     st.stop()
 
-# ===================== LLM (Hugging Face Hub) =====================
+# ===================== LLM & Chains =====================
 text_generation_pipeline = pipeline(
-    "text2text-generation",  # For FLAN-T5
+    "text2text-generation",
     model="google/flan-t5-base",
     max_new_tokens=256,
     temperature=0.7
 )
 llm = HuggingFacePipeline(pipeline=text_generation_pipeline)
 
-# ===================== Retrieval QA (with conversation memory) =====================
 memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
 qa_chain = ConversationalRetrievalChain.from_llm(
     llm,
@@ -113,7 +152,6 @@ qa_chain = ConversationalRetrievalChain.from_llm(
     memory=memory
 )
 
-# ===================== Google Search (Serper API) =====================
 use_web_search = bool(SERPER_API_KEY)
 if use_web_search:
     search = GoogleSerperAPIWrapper(serper_api_key=SERPER_API_KEY)
@@ -124,71 +162,88 @@ if use_web_search:
     )
 
 # ===================== Sidebar =====================
-st.set_page_config(page_title="INDI_Chatbot", layout="wide")
+st.set_page_config(page_title="INDIBOT AI", layout="wide")
 with st.sidebar:
-    try:
-        logo = Image.open("INDIBOT.png")
-        st.image(logo, width=100)
-    except:
-        st.markdown("⚠️ Add 'INDIBOT.png' in your project folder.")
-    st.title("📚 Chat History")
-    for msg in reversed(st.session_state.chat_history):
-        st.markdown(f"- 💬 {msg['query'][:30]}...")
-    if st.button("🆕 New Chat"):
-        st.session_state.chat_history.clear()
+    st.header("👤 Profile")
+    st.markdown(f"**Logged in as:** `{st.session_state.username}`")
+    if st.button("Logout", key="logout_btn"):
+        st.session_state.user_logged_in = False
+        st.session_state.username = None
+        st.session_state.messages = []
+        st.session_state.chat_history = []
         st.rerun()
+        
     st.markdown("---")
-    if st.button("🌓 Toggle Theme"):
-        toggle_theme()
+    
+    st.header("💬 Recent Chats")
+    if os.path.exists(CHAT_HISTORY_FILE):
+        with open(CHAT_HISTORY_FILE, "r") as f:
+            all_chats = json.load(f)
+        for chat in all_chats:
+            if st.button(f"📄 {chat['title']}", key=f"chat_{chat['id']}"):
+                load_chat(chat['id'])
+    
+    st.markdown("---")
+    if st.button("🆕 New Chat", key="new_chat_btn"):
+        st.session_state.messages = []
+        st.session_state.chat_history = []
+        st.session_state.current_chat_id = None
         st.rerun()
-    st.markdown(f"👤 Logged in as: {st.session_state.username}")
 
 # ===================== Main UI =====================
-st.title("🧠 INDIBOT")
-st.markdown("Ask me anything about AI, Python, Economy, General Knowledge or Live Web Search! ✨")
+st.title("🧠 IndiBot AI")
+st.write("Ask me anything about AI, Python, Economy, General Knowledge or Live Web Search! ✨")
 
-user_question = st.text_input("🎤 Ask your question:", placeholder="Type your query here...")
-if st.button("Get Answer") or user_question:
-    if user_question:
-        st.session_state.loading = True
-        with st.spinner("🔄 Thinking..."):
+# Display chat messages from history on app rerun
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+if user_question := st.chat_input("🎤 Ask your question..."):
+    # Display user message in chat message container
+    st.session_state.messages.append({"role": "user", "content": user_question})
+    with st.chat_message("user"):
+        st.markdown(user_question)
+        
+    found_in_history = False
+    
+    # Check if the question is in the current chat history
+    for i in range(len(st.session_state.messages) - 1, -1, -1):
+        if st.session_state.messages[i]["role"] == "user" and st.session_state.messages[i]["content"] == user_question:
+            if i + 1 < len(st.session_state.messages):
+                ai_answer = st.session_state.messages[i+1]["content"]
+                st.session_state.messages.append({"role": "assistant", "content": ai_answer})
+                with st.chat_message("assistant"):
+                    st.markdown("**(Found in chat history):** " + ai_answer)
+                found_in_history = True
+                break
+
+    if not found_in_history:
+        with st.spinner("🔄 Checking local documents..."):
             try:
                 local_answer = qa_chain.run(user_question)
-                st.session_state.loading = False
-                st.chat_message("user", avatar="👤").write(user_question)
-                st.chat_message("ai", avatar="🤖").write(local_answer)
-                st.session_state.chat_history.append({
-                    "user": st.session_state.username,
-                    "query": user_question,
-                    "answer": local_answer
-                })
+                st.session_state.messages.append({"role": "assistant", "content": local_answer})
+                with st.chat_message("assistant"):
+                    st.markdown(local_answer)
+                
+                # Save the new conversation to the history file
+                if st.session_state.current_chat_id is None:
+                    st.session_state.current_chat_id = str(datetime.now().timestamp())
+                save_chat_history(st.session_state.current_chat_id, user_question, local_answer)
+                
             except Exception as e:
-                st.session_state.loading = False
                 st.error(f"❌ Local QA failed: {e}")
-
-        # ============ Run Web Search if API available ============
-        if use_web_search:
-            try:
-                web_result = web_search_tool.run(user_question)
-                st.markdown("### 🌐 Web Search Result")
-                st.info(web_result)
-            except Exception as e:
-                st.warning("⚠️ Web search failed.")
-                st.error(str(e))
-
-# ===================== Theme CSS =====================
-if st.session_state.dark_mode:
-    st.markdown("""
-        <style>
-        body, .stApp { background-color: #121212; color: #f0f0f0; }
-        .stTextInput, .stTextArea { background-color: #333 !important; color: white; }
-        .css-1cpxqw2 { background-color: #1f1f1f !important; }
-        .element-container:has(.stSpinner) .stSpinner { color: #00FFAA; }
-        </style>
-    """, unsafe_allow_html=True)
-else:
-    st.markdown("""
-        <style>
-        body, .stApp { background-color: #ffffff; color: #000000; }
-        </style>
-    """, unsafe_allow_html=True)
+                
+        # ============ Run Web Search if API available and local QA failed or was unhelpful ============
+        if use_web_search and "i don't know" in local_answer.lower():
+            with st.spinner("🌐 Performing web search..."):
+                try:
+                    web_result = web_search_tool.run(user_question)
+                    final_answer = f"### 🌐 Web Search Result\n{web_result}"
+                    st.session_state.messages.append({"role": "assistant", "content": final_answer})
+                    with st.chat_message("assistant"):
+                        st.markdown(final_answer)
+                except Exception as e:
+                    st.warning("⚠️ Web search failed.")
+                    st.error(str(e))
+    st.rerun()
