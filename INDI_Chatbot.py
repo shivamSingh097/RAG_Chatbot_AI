@@ -7,13 +7,13 @@ from datetime import datetime
 import streamlit as st
 from PIL import Image
 import altair as alt
+import sys
+
 try:
     import pysqlite3
-    import sys
     sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
-except KeyError:
+except ImportError:
     import sqlite3
-sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 
 # NLP and ML
 import spacy
