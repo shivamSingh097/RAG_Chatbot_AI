@@ -34,7 +34,13 @@ NEWS_API_KEY = os.environ.get("NEWS_API_KEY", st.secrets.get("NEWS_API_KEY"))
 if not HF_TOKEN:
     st.error("❌ Hugging Face token missing.")
     st.stop()
-login(HF_TOKEN)
+if HF_TOKEN:
+    try:
+        login(HF_TOKEN)
+    except Exception as e:
+        st.warning("⚠️ Hugging Face login failed. Check token in Streamlit secrets.")
+else:
+    st.warning("⚠️ No Hugging Face token provided. Some models may not load.")
 
 # ---------------- Vector DB ----------------
 FAISS_INDEX_PATH = "faiss_index.pkl"
