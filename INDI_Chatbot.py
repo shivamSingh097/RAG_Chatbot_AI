@@ -1,53 +1,65 @@
 import os
-import pickle
+import sys
 import json
+import pickle
+from datetime import datetime
 import streamlit as st
 from PIL import Image
+
+# ==== Fix for SQLite (ChromaDB / FAISS) on Streamlit Cloud ====
+import pysqlite3
+sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+
+# ==== NLP libraries ====
+import spacy
+from textblob import TextBlob
+from difflib import get_close_matches
+
 from huggingface_hub import login
 from transformers import pipeline
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
 from langchain_community.llms import HuggingFacePipeline
-from langchain_community.utilities import GoogleSerperAPIWrapper
+from langchain_community.utilities import GoogleSerperAPIWrapper, WikipediaAPIWrapper
 from langchain.agents import Tool
 from langchain.tools import WikipediaQueryRun
-from langchain_community.utilities import WikipediaAPIWrapper
-from datetime import datetime
-import pysqlite3
-import sys
 
-# ===================== Fix for ChromaDB and sqlite3 on Streamlit Cloud =====================
-sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
-
-# ===================== API Keys & Configuration =====================
+# ================== API KEYS ==================
 HF_TOKEN = os.environ.get("HUGGINGFACEHUB_API_TOKEN", st.secrets.get("HUGGINGFACEHUB_API_TOKEN"))
 if not HF_TOKEN:
-    st.error("❌ Hugging Face token is missing. Add it to .streamlit/secrets.toml")
+    st.error("❌ Hugging Face token is missing in .streamlit/secrets.toml")
     st.stop()
 login(HF_TOKEN)
 
 SERPER_API_KEY = os.environ.get("SERPER_API_KEY", st.secrets.get("SERPER_API_KEY"))
 
-# ===================== Check FAISS Index =====================
+# ================== Load Vector DB ==================
 FAISS_INDEX_PATH = "faiss_index.pkl"
 if not os.path.exists(FAISS_INDEX_PATH):
-    st.error("❌ FAISS index not found. Run ingest.py first to create it.")
+    st.error("❌ FAISS index not found. Run ingest.py first.")
     st.stop()
 
 with open(FAISS_INDEX_PATH, "rb") as f:
     vector_db = pickle.load(f)
 
-# ===================== Session State & Chat History Management =====================
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
+# ================== NLP Initialization ==================
+nlp = spacy.load("en_core_web_sm")
+
+# ================== Session & Chat ==================
 if "messages" not in st.session_state:
     st.session_state.messages = []
-if "current_chat_id" not in st.session_state:
-    st.session_state.current_chat_id = None
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+if "entities" not in st.session_state:
+    st.session_state.entities = []
+if "dark_mode" not in st.session_state:
+    st.session_state.dark_mode = False
 if "user_logged_in" not in st.session_state:
     st.session_state.user_logged_in = False
 if "username" not in st.session_state:
     st.session_state.username = "Guest"
+if "current_chat_id" not in st.session_state:
+    st.session_state.current_chat_id = None
 
 CHAT_HISTORY_FILE = "chat_history.json"
 
@@ -56,7 +68,6 @@ def save_chat_history(chat_id, user_message, ai_message):
     if os.path.exists(CHAT_HISTORY_FILE):
         with open(CHAT_HISTORY_FILE, "r") as f:
             history = json.load(f)
-    
     chat_found = False
     for chat in history:
         if chat["id"] == chat_id:
@@ -64,7 +75,6 @@ def save_chat_history(chat_id, user_message, ai_message):
             chat["last_updated"] = datetime.now().isoformat()
             chat_found = True
             break
-            
     if not chat_found:
         history.append({
             "id": chat_id,
@@ -72,10 +82,9 @@ def save_chat_history(chat_id, user_message, ai_message):
             "last_updated": datetime.now().isoformat(),
             "conversation": [{"user": user_message, "ai": ai_message}]
         })
-        
     with open(CHAT_HISTORY_FILE, "w") as f:
         json.dump(history, f, indent=4)
-        
+
 def load_chat(chat_id):
     if os.path.exists(CHAT_HISTORY_FILE):
         with open(CHAT_HISTORY_FILE, "r") as f:
@@ -90,13 +99,11 @@ def load_chat(chat_id):
                 st.session_state.chat_history = chat["conversation"]
                 st.rerun()
 
-# ===================== Authentication =====================
+# ================== Authentication ==================
 def login_page():
     st.title("🔐 Welcome to INDIBOT")
-    st.markdown("---")
     tab1, tab2 = st.tabs(["Login", "Register"])
     with tab1:
-        st.subheader("Login to your account")
         username = st.text_input("Username", key="login_username")
         password = st.text_input("Password", type="password", key="login_password")
         if st.button("Login", key="login_button"):
@@ -104,9 +111,9 @@ def login_page():
                 st.error("Please enter both username and password.")
             else:
                 try:
-                    with open("users.json", 'r') as f:
+                    with open("users.json", "r") as f:
                         users = json.load(f)
-                    user_found = any(u['username'] == username and u['password'] == password for u in users)
+                    user_found = any(u["username"] == username and u["password"] == password for u in users)
                     if user_found:
                         st.session_state.user_logged_in = True
                         st.session_state.username = username
@@ -116,84 +123,74 @@ def login_page():
                 except FileNotFoundError:
                     st.error("No registered users found. Please register first.")
     with tab2:
-        st.subheader("Create a new account")
         reg_username = st.text_input("Username", key="reg_username")
         reg_password = st.text_input("Password", type="password", key="reg_password")
         reg_email = st.text_input("Email ID", key="reg_email")
         if st.button("Register", key="register_button"):
             if not reg_username or not reg_password or not reg_email:
-                st.error("Username, password, and email are compulsory.")
+                st.error("All fields are required.")
             else:
                 if not os.path.exists("users.json"):
                     with open("users.json", "w") as f:
                         json.dump([], f)
-                with open("users.json", 'r') as f:
+                with open("users.json", "r") as f:
                     users = json.load(f)
-                if any(u['username'] == reg_username for u in users):
-                    st.error("Username already exists. Please choose another.")
-                elif any(u['email'] == reg_email for u in users):
-                    st.error("Email ID already registered. Please use another.")
+                if any(u["username"] == reg_username for u in users):
+                    st.error("Username already exists.")
+                elif any(u["email"] == reg_email for u in users):
+                    st.error("Email already registered.")
                 else:
-                    user_data = {"username": reg_username, "password": reg_password, "email": reg_email}
-                    users.append(user_data)
-                    with open("users.json", 'w') as f:
+                    users.append({"username": reg_username, "password": reg_password, "email": reg_email})
+                    with open("users.json", "w") as f:
                         json.dump(users, f, indent=4)
-                    st.success("Registration successful! You can now log in.")
+                    st.success("Registration successful!")
 
-# ===================== LLM & Chains =====================
-# This part is outside the login function, so it only runs after login
-text_generation_pipeline = pipeline(
-    "text2text-generation",
-    model="google/flan-t5-base",
-    max_new_tokens=512,
-    temperature=0.7
-)
+# ================== LLM & Chains ==================
+text_generation_pipeline = pipeline("text2text-generation", model="google/flan-t5-base", max_new_tokens=512, temperature=0.7)
 llm = HuggingFacePipeline(pipeline=text_generation_pipeline)
 
-# Use a standard retrieval chain instead of an agent to avoid the AttributeError
 qa_chain = ConversationalRetrievalChain.from_llm(
     llm,
     retriever=vector_db.as_retriever(search_kwargs={"k": 3}),
     memory=ConversationBufferMemory(memory_key="chat_history", return_messages=True)
 )
-
 wikipedia = WikipediaQueryRun(api_wrapper=WikipediaAPIWrapper())
+google_search = GoogleSerperAPIWrapper(serper_api_key=SERPER_API_KEY) if SERPER_API_KEY else None
 
-# ===================== Main App Logic =====================
-def get_intent_response(user_msg):
-    """Check rule-based knowledge base for a quick response"""
-    knowledge_base = {
-        "what is your name": "🤖 I'm IndiBot, your friendly AI assistant!",
-        "how are you": "😊 I'm just code, but thanks for asking! How can I help?",
-        "tell me a joke": "😄 Why did the developer go broke? Because they used up all their cache!",
-        "what can you do": "🧠 I can answer questions, search the web, and more. Try me!",
-    }
+# ================== Rule-based KB ==================
+RULE_BASED_RESPONSES = {
+    "what is your name": "I am INDIBOT, your personal AI assistant!",
+    "who created you": "I was created by Shivam Singh Bhadoriya.",
+    "how are you": "I'm doing great and always ready to help you!",
+    "hello": "Hello! How can I assist you today?",
+    "hi": "Hi there! Ready to chat."
+}
 
-    cleaned = user_msg.lower().strip()
-    return knowledge_base.get(cleaned, None)
-
-
-def extract_intents_keywords(text):
-    """Simple NLP keyword-based intent recognition"""
-    keywords = {
-        "name": "🤖 I'm IndiBot, your AI assistant!",
-        "hello": "👋 Hello! How can I help you today?",
-        "hi": "👋 Hi there! Ask me anything.",
-        "order pizza": "🍕 Sure! Please provide size and toppings (Demo action triggered)",
-        "thank you": f"You're welcome, {st.session_state.get('user_name', 'friend')}! 😊",
-    }
-
-    for keyword in keywords:
-        if keyword in text.lower():
-            return keywords[keyword]
+def match_intent(query):
+    q = query.lower()
+    # direct keyword match
+    for key, value in RULE_BASED_RESPONSES.items():
+        if key in q:
+            return value
+    # fuzzy match for near queries
+    match = get_close_matches(q, RULE_BASED_RESPONSES.keys(), n=1, cutoff=0.75)
+    if match:
+        return RULE_BASED_RESPONSES[match[0]]
     return None
 
+def analyze_entities_and_sentiment(user_input):
+    doc = nlp(user_input)
+    entities = [(ent.text, ent.label_) for ent in doc.ents]
+    sentiment = TextBlob(user_input).sentiment.polarity
+    tone = "positive" if sentiment > 0.1 else "negative" if sentiment < -0.1 else "neutral"
+    st.session_state.entities.extend(entities)
+    return entities, tone
 
+# ================== Main Chat ==================
 def main_app():
-    st.title("🧠 IndiBot AI")
-    st.write("Ask me anything about AI, Python, Economy, General Knowledge or Live Web Search! ✨")
+    st.title("🧠 INDIBOT AI (Hybrid Search + NLP)")
+    st.caption("Understands context, intent, tone, and has memory!")
 
-    # Display history
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
@@ -203,102 +200,93 @@ def main_app():
         with st.chat_message("user"):
             st.markdown(user_question)
 
+        # NLP Processing
+        entities, tone = analyze_entities_and_sentiment(user_question)
+        st.info(f"Detected tone: **{tone}** | Entities: {entities if entities else 'None'}")
+
         with st.spinner("🔄 Thinking..."):
-            try:
-                # Step 1: Rule-based (Exact Match)
-                rule_response = get_intent_response(user_question)
-                if rule_response:
-                    final_response = rule_response
+            # Step 1: Rule-based intent
+            rule_answer = match_intent(user_question)
+            if rule_answer:
+                final_response = rule_answer
+            else:
+                # Step 2: RAG local search
+                rag_answer = qa_chain.invoke({"question": user_question, "chat_history": st.session_state.chat_history})
+                final_response = rag_answer["answer"]
 
-                else:
-                    # Step 2: NLP-style Intent Matching
-                    intent_response = extract_intents_keywords(user_question)
-                    if intent_response:
-                        final_response = intent_response
-
+                # Step 3: Wikipedia fallback
+                if not final_response or "i don't know" in final_response.lower():
+                    wiki_summary = wikipedia.run(user_question)
+                    if wiki_summary and "may refer to" not in wiki_summary.lower():
+                        prompt = f"Question: {user_question}\nWikipedia: {wiki_summary}\nAnswer:"
+                        final_response = llm.invoke(prompt)
+                    elif google_search:
+                        final_response = google_search.run(user_question)
                     else:
-                        # Step 3: Local Knowledge Base (RAG)
-                        local_answer = qa_chain.invoke({"question": user_question, "chat_history": st.session_state.chat_history})
-                        final_response = local_answer['answer']
+                        final_response = "I'm sorry, I couldn't find relevant information."
 
-                        if "i don't know" in final_response.lower() or "could not find" in final_response.lower() or "unanswerable" in final_response.lower():
-                            st.info("🤔 Couldn't find locally. Trying Wikipedia...")
+        st.session_state.messages.append({"role": "assistant", "content": final_response})
+        with st.chat_message("assistant"):
+            st.markdown(final_response)
 
-                            wiki_summary = wikipedia.run(user_question)
+        # Save chat
+        if st.session_state.current_chat_id is None:
+            st.session_state.current_chat_id = str(datetime.now().timestamp())
+        save_chat_history(st.session_state.current_chat_id, user_question, final_response)
 
-                            # ✅ Check if result is relevant (contains a keyword from question)
-                            if any(keyword.lower() in wiki_summary.lower() for keyword in ["india", "states", "state", "number", "how many"]):
-                                prompt = f"""
-                                You are a helpful assistant. Based on the following Wikipedia snippet, answer the user's question clearly.
-                                
-                                Question: {user_question}
-                                Wikipedia Snippet: {wiki_summary}
-                                
-                                Final Answer:"""
-                                final_response = llm.invoke(prompt)
-                            else:
-                                st.info("🌐 Wikipedia wasn't helpful. Trying Google Search via Parser API...")
-                                try:
-                                    parser_result = google_parser_search.run(user_question)
-                                    final_response = f"🔍 Google says: {parser_result}"
-                                except Exception as e:
-                                    final_response = "❌ All sources failed to provide a good answer."
-
-                            else:
-                                # Final answer synthesis from wiki
-                                prompt = f"""
-                                You are a helpful assistant. Based on the following Wikipedia result, answer the user's question.
-                                Question: {user_question}
-                                Wiki Summary: {wiki_summary}
-                                Answer:"""
-                                final_response = llm.invoke(prompt)
-
-                # Show bot reply
-                with st.chat_message("assistant"):
-                    st.markdown(final_response)
-
-                # Store message
-                st.session_state.messages.append({"role": "assistant", "content": final_response})
-
-                # Save chat to file
-                if st.session_state.current_chat_id is None:
-                    st.session_state.current_chat_id = str(datetime.now().timestamp())
-                save_chat_history(st.session_state.current_chat_id, user_question, final_response)
-
-            except Exception as e:
-                st.error("❌ An error occurred.")
-                st.exception(e)
-
-
-# ===================== Sidebar and Entry Point =====================
+# ================== Sidebar ==================
 st.set_page_config(page_title="INDIBOT AI", layout="wide")
 with st.sidebar:
-    st.header("👤 Profile")
-    st.markdown(f"**Logged in as:** `{st.session_state.username}`")
-    if st.button("Logout", key="logout_btn"):
+    try:
+        logo = Image.open("INDIBOT.png")
+        st.image(logo, width=120)
+    except:
+        st.write("🤖 INDIBOT")
+    st.header("Settings")
+    if st.button("Toggle Dark Mode"):
+        st.session_state.dark_mode = not st.session_state.dark_mode
+        st.rerun()
+
+    st.markdown("---")
+    st.header("Profile")
+    st.write(f"**User:** {st.session_state.username}")
+    if st.button("Logout"):
         st.session_state.user_logged_in = False
-        st.session_state.username = None
+        st.session_state.username = "Guest"
         st.session_state.messages = []
         st.session_state.chat_history = []
         st.rerun()
-        
+
     st.markdown("---")
-    
-    st.header("💬 Recent Chats")
+    st.header("Recent Chats")
     if os.path.exists(CHAT_HISTORY_FILE):
         with open(CHAT_HISTORY_FILE, "r") as f:
             all_chats = json.load(f)
         for chat in all_chats:
             if st.button(f"📄 {chat['title']}", key=f"chat_{chat['id']}"):
-                load_chat(chat['id'])
-    
-    st.markdown("---")
-    if st.button("🆕 New Chat", key="new_chat_btn"):
+                load_chat(chat["id"])
+    if st.button("🆕 New Chat"):
         st.session_state.messages = []
         st.session_state.chat_history = []
         st.session_state.current_chat_id = None
         st.rerun()
-        
+
+# ================== Dark Mode CSS ==================
+if st.session_state.dark_mode:
+    st.markdown("""
+        <style>
+        body, .stApp { background-color: #121212; color: #f0f0f0; }
+        .stTextInput, .stTextArea { background-color: #333 !important; color: white; }
+        </style>
+    """, unsafe_allow_html=True)
+else:
+    st.markdown("""
+        <style>
+        body, .stApp { background-color: #ffffff; color: #000000; }
+        </style>
+    """, unsafe_allow_html=True)
+
+# ================== Entry Point ==================
 if not st.session_state.user_logged_in:
     login_page()
 else:
