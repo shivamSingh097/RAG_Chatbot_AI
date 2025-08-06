@@ -1,5 +1,5 @@
 streamlit
-spacy
+spacy>=3.7.2
 sentence-transformers
 transformers
 langchain
@@ -8,3 +8,5 @@ altair
 pysqlite3-binary
 wikipedia
 google-search-results
+pyttsx3
+newsapi-python
