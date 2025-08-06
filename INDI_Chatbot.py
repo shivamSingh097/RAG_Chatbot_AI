@@ -7,22 +7,13 @@ from datetime import datetime
 import streamlit as st
 from PIL import Image
 import altair as alt
-import sys
-
-try:
-    import pysqlite3
-    sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
-except ImportError:
-    import sqlite3
 
 # NLP and ML
 import spacy
 try:
     nlp = spacy.load("en_core_web_sm")
 except OSError:
-    from spacy.cli import download
-    download("en_core_web_sm", False)  # Download to user space
-    nlp = spacy.load("en_core_web_sm")
+    nlp = spacy.blank("en")
 from spacy.cli import download as spacy_download
 from textblob import TextBlob
 from sentence_transformers import SentenceTransformer, util
