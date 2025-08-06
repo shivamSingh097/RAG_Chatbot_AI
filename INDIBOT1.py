@@ -4,18 +4,21 @@ import json
 import streamlit as st
 from PIL import Image
 from huggingface_hub import login
+from transformers import pipeline
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
-from langchain_community.llms import HuggingFaceHub
-from transformers import pipeline
 from langchain_community.llms import HuggingFacePipeline
+from langchain_community.utilities import GoogleSerperAPIWrapper
+from langchain.agents import Tool
 
-# ===================== API Key (Hugging Face) =====================
+# ===================== API Keys =====================
 HF_TOKEN = os.environ.get("HUGGINGFACEHUB_API_TOKEN", st.secrets.get("HUGGINGFACEHUB_API_TOKEN"))
 if not HF_TOKEN:
     st.error("❌ Hugging Face token is missing. Add it to .streamlit/secrets.toml")
     st.stop()
 login(HF_TOKEN)
+
+SERPER_API_KEY = os.environ.get("SERPER_API_KEY", st.secrets.get("SERPER_API_KEY"))
 
 # ===================== Check FAISS Index =====================
 FAISS_INDEX_PATH = "faiss_index.pkl"
@@ -110,6 +113,16 @@ qa_chain = ConversationalRetrievalChain.from_llm(
     memory=memory
 )
 
+# ===================== Google Search (Serper API) =====================
+use_web_search = bool(SERPER_API_KEY)
+if use_web_search:
+    search = GoogleSerperAPIWrapper(serper_api_key=SERPER_API_KEY)
+    web_search_tool = Tool(
+        name="Google Search",
+        description="Fetch real-time web search results",
+        func=search.run
+    )
+
 # ===================== Sidebar =====================
 st.set_page_config(page_title="INDI_Chatbot", layout="wide")
 with st.sidebar:
@@ -131,8 +144,8 @@ with st.sidebar:
     st.markdown(f"👤 Logged in as: {st.session_state.username}")
 
 # ===================== Main UI =====================
-st.title("🧠 INDIBOT (Vocal for Local)")
-st.markdown("Ask me anything about AI, Python, Economy or General Knowledge! ✨")
+st.title("🧠 INDIBOT")
+st.markdown("Ask me anything about AI, Python, Economy, General Knowledge or Live Web Search! ✨")
 
 user_question = st.text_input("🎤 Ask your question:", placeholder="Type your query here...")
 if st.button("Get Answer") or user_question:
@@ -152,6 +165,16 @@ if st.button("Get Answer") or user_question:
             except Exception as e:
                 st.session_state.loading = False
                 st.error(f"❌ Local QA failed: {e}")
+
+        # ============ Run Web Search if API available ============
+        if use_web_search:
+            try:
+                web_result = web_search_tool.run(user_question)
+                st.markdown("### 🌐 Web Search Result")
+                st.info(web_result)
+            except Exception as e:
+                st.warning("⚠️ Web search failed.")
+                st.error(str(e))
 
 # ===================== Theme CSS =====================
 if st.session_state.dark_mode:
