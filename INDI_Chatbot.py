@@ -7,18 +7,18 @@ from datetime import datetime
 import streamlit as st
 from PIL import Image
 import altair as alt
-
-# SQLite Fix
 import pysqlite3
 sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 
-# NLP
+# NLP and ML
 import spacy
+from spacy.cli import download as spacy_download
 from textblob import TextBlob
 from sentence_transformers import SentenceTransformer, util
 import numpy as np
 from gtts import gTTS
 
+# HuggingFace & LangChain
 from huggingface_hub import login
 from transformers import pipeline
 from langchain.chains import ConversationalRetrievalChain
@@ -27,16 +27,16 @@ from langchain_community.llms import HuggingFacePipeline
 from langchain_community.utilities import GoogleSerperAPIWrapper, WikipediaAPIWrapper
 from langchain.tools import WikipediaQueryRun
 
-# ================= API KEYS =================
+# ---------------- API Keys ----------------
 HF_TOKEN = os.environ.get("HUGGINGFACEHUB_API_TOKEN", st.secrets.get("HUGGINGFACEHUB_API_TOKEN"))
+SERPER_API_KEY = os.environ.get("SERPER_API_KEY", st.secrets.get("SERPER_API_KEY"))
+NEWS_API_KEY = os.environ.get("NEWS_API_KEY", st.secrets.get("NEWS_API_KEY"))
 if not HF_TOKEN:
     st.error("❌ Hugging Face token missing.")
     st.stop()
 login(HF_TOKEN)
-SERPER_API_KEY = os.environ.get("SERPER_API_KEY", st.secrets.get("SERPER_API_KEY"))
-NEWS_API_KEY = os.environ.get("NEWS_API_KEY", st.secrets.get("NEWS_API_KEY"))
 
-# ================= Vector DB =================
+# ---------------- Vector DB ----------------
 FAISS_INDEX_PATH = "faiss_index.pkl"
 if not os.path.exists(FAISS_INDEX_PATH):
     st.error("❌ FAISS index not found. Run ingest.py first.")
@@ -44,10 +44,16 @@ if not os.path.exists(FAISS_INDEX_PATH):
 with open(FAISS_INDEX_PATH, "rb") as f:
     vector_db = pickle.load(f)
 
-# ================= NLP Setup =================
-nlp = spacy.load("en_core_web_sm")
+# ---------------- SpaCy Model ----------------
+try:
+    nlp = spacy.load("en_core_web_sm")
+except OSError:
+    spacy_download("en_core_web_sm")
+    nlp = spacy.load("en_core_web_sm")
+
 intent_model = SentenceTransformer("all-MiniLM-L6-v2")
 
+# ---------------- Intents ----------------
 INTENT_RESPONSES = {
     "greeting": "Hello {name}! How can I help you today?",
     "creator": "I was created by Shivam Singh Bhadoriya.",
@@ -62,20 +68,6 @@ INTENT_PATTERNS = {
     "name": ["what is your name", "who are you"],
     "bye": ["bye", "goodbye", "see you"]
 }
-
-# ================= User Profiles =================
-PROFILE_FILE = "user_profiles.json"
-def load_profiles():
-    if os.path.exists(PROFILE_FILE):
-        with open(PROFILE_FILE, "r") as f:
-            return json.load(f)
-    return {}
-
-def save_profiles(data):
-    with open(PROFILE_FILE, "w") as f:
-        json.dump(data, f, indent=4)
-
-profiles = load_profiles()
 
 def classify_intent(user_input):
     scores = {}
@@ -95,7 +87,7 @@ def analyze_entities_and_sentiment(user_input):
     tone = "positive" if sentiment > 0.1 else "negative" if sentiment < -0.1 else "neutral"
     return entities, tone
 
-# ================= Session =================
+# ---------------- Session ----------------
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "chat_history" not in st.session_state:
@@ -111,6 +103,8 @@ if "dark_mode" not in st.session_state:
 if "analytics" not in st.session_state:
     st.session_state.analytics = []
 
+# ---------------- File Paths ----------------
+USERS_FILE = "users.json"
 CHAT_HISTORY_FILE = "chat_history.json"
 
 def save_chat_history(chat_id, user_message, ai_message, tone):
@@ -135,37 +129,63 @@ def save_chat_history(chat_id, user_message, ai_message, tone):
     with open(CHAT_HISTORY_FILE, "w") as f:
         json.dump(history, f, indent=4)
 
-# ================= Auth =================
+# ---------------- Login & Registration ----------------
 def login_page():
     st.title("🔐 Welcome to INDIBOT")
-    name = st.text_input("Your Name", key="name_input")
-    username = st.text_input("Username", key="login_username")
-    password = st.text_input("Password", type="password", key="login_password")
-    if st.button("Login"):
-        if username and password:
-            user_profiles = load_profiles()
-            if username in user_profiles and user_profiles[username]["password"] == password:
-                st.session_state.user_logged_in = True
-                st.session_state.username = username
-                st.session_state.user_name = user_profiles[username].get("name", username)
-                st.rerun()
+    tab1, tab2 = st.tabs(["Login", "Register"])
+    with tab1:
+        username = st.text_input("Username", key="login_username")
+        password = st.text_input("Password", type="password", key="login_password")
+        if st.button("Login", key="login_button"):
+            if not username or not password:
+                st.error("Please enter both username and password.")
             else:
-                st.error("Invalid credentials")
-        else:
-            st.error("Please fill all fields")
+                if os.path.exists(USERS_FILE):
+                    with open(USERS_FILE, 'r') as f:
+                        users = json.load(f)
+                else:
+                    users = []
+                user_found = any(u['username'] == username and u['password'] == password for u in users)
+                if user_found:
+                    st.session_state.user_logged_in = True
+                    st.session_state.username = username
+                    st.session_state.user_name = username
+                    st.rerun()
+                else:
+                    st.error("Invalid username or password.")
+    with tab2:
+        reg_username = st.text_input("Username", key="reg_username")
+        reg_password = st.text_input("Password", type="password", key="reg_password")
+        reg_email = st.text_input("Email ID", key="reg_email")
+        if st.button("Register", key="register_button"):
+            if not reg_username or not reg_password or not reg_email:
+                st.error("Username, password, and email are compulsory.")
+            else:
+                if not os.path.exists(USERS_FILE):
+                    with open(USERS_FILE, "w") as f:
+                        json.dump([], f)
+                with open(USERS_FILE, 'r') as f:
+                    users = json.load(f)
+                if any(u['username'] == reg_username for u in users):
+                    st.error("Username already exists.")
+                elif any(u['email'] == reg_email for u in users):
+                    st.error("Email ID already registered.")
+                else:
+                    users.append({"username": reg_username, "password": reg_password, "email": reg_email})
+                    with open(USERS_FILE, 'w') as f:
+                        json.dump(users, f, indent=4)
+                    st.success("Registration successful! Please login.")
 
-# ================= LLM & Chains =================
+
+# ---------------- LLM & RAG ----------------
 text_generation_pipeline = pipeline("text2text-generation", model="google/flan-t5-base", max_new_tokens=512, temperature=0.7)
 llm = HuggingFacePipeline(pipeline=text_generation_pipeline)
-qa_chain = ConversationalRetrievalChain.from_llm(
-    llm,
-    retriever=vector_db.as_retriever(search_kwargs={"k": 3}),
-    memory=ConversationBufferMemory(memory_key="chat_history", return_messages=True)
-)
+qa_chain = ConversationalRetrievalChain.from_llm(llm, retriever=vector_db.as_retriever(search_kwargs={"k": 3}),
+                                                 memory=ConversationBufferMemory(memory_key="chat_history", return_messages=True))
 wikipedia = WikipediaQueryRun(api_wrapper=WikipediaAPIWrapper())
 google_search = GoogleSerperAPIWrapper(serper_api_key=SERPER_API_KEY) if SERPER_API_KEY else None
 
-# ================= Helper: News API =================
+# ---------------- Helpers ----------------
 def fetch_news():
     if not NEWS_API_KEY:
         return ["NEWS_API_KEY not configured."]
@@ -176,29 +196,24 @@ def fetch_news():
         return [f"- {a['title']}" for a in articles[:5]]
     return ["Failed to fetch news."]
 
-# ================= Helper: Voice =================
 def speak_text(text):
     tts = gTTS(text)
     file_path = "response.mp3"
     tts.save(file_path)
     return file_path
 
-# ================= Main Chat =================
+# ---------------- Chat Tab ----------------
 def main_chat():
     st.title(f"🧠 INDIBOT AI - Hello {st.session_state.user_name}")
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
-
     if user_question := st.chat_input("Ask your question..."):
         st.session_state.messages.append({"role": "user", "content": user_question})
-        with st.chat_message("user"):
-            st.markdown(user_question)
-
+        with st.chat_message("user"): st.markdown(user_question)
         entities, tone = analyze_entities_and_sentiment(user_question)
         intent = classify_intent(user_question)
         st.info(f"Tone: **{tone}**, Entities: {entities if entities else 'None'}")
-
         with st.spinner("Thinking..."):
             if intent and intent in INTENT_RESPONSES:
                 name = st.session_state.user_name or "Friend"
@@ -215,58 +230,45 @@ def main_chat():
                         final_response = google_search.run(user_question)
                     else:
                         final_response = "I couldn't find relevant information."
-
         st.session_state.messages.append({"role": "assistant", "content": final_response})
         with st.chat_message("assistant"):
             st.markdown(final_response)
             if st.button("🔊 Speak", key=f"voice_{len(st.session_state.messages)}"):
-                audio_path = speak_text(final_response)
-                st.audio(audio_path)
-
+                st.audio(speak_text(final_response))
         save_chat_history(str(datetime.now().timestamp()), user_question, final_response, tone)
         st.session_state.analytics.append({"question": user_question, "tone": tone, "timestamp": datetime.now().isoformat()})
 
-# ================= Analytics Tab =================
+# ---------------- Analytics Tab ----------------
 def analytics_tab():
     st.title("📊 Chat Analytics")
     if not st.session_state.analytics:
         st.write("No analytics yet.")
         return
     df = [{"Tone": a["tone"], "Time": a["timestamp"]} for a in st.session_state.analytics]
-    chart = alt.Chart(alt.Data(values=df)).mark_bar().encode(
-        x="Tone:N", y="count():Q"
-    )
+    chart = alt.Chart(alt.Data(values=df)).mark_bar().encode(x="Tone:N", y="count():Q")
     st.altair_chart(chart, use_container_width=True)
 
-# ================= News Tab =================
+# ---------------- News Tab ----------------
 def news_tab():
     st.title("📰 Top News Headlines")
     news = fetch_news()
-    for n in news:
-        st.write(n)
+    for n in news: st.write(n)
 
-# ================= Sidebar =================
+# ---------------- Sidebar & Routing ----------------
 st.set_page_config(page_title="INDIBOT AI", layout="wide")
 tabs = st.sidebar.radio("Choose a page", ["Chat", "Analytics", "News"])
-if st.button("Toggle Dark Mode"):
-    st.session_state.dark_mode = not st.session_state.dark_mode
-    st.rerun()
+if st.button("Toggle Dark Mode"): st.session_state.dark_mode = not st.session_state.dark_mode; st.rerun()
 if st.button("Logout"):
     st.session_state.user_logged_in = False
     st.session_state.messages = []
     st.session_state.chat_history = []
     st.rerun()
-
 if st.session_state.dark_mode:
     st.markdown("""<style>body, .stApp { background-color: #121212; color: #f0f0f0; }</style>""", unsafe_allow_html=True)
 
-# ================= Entry =================
 if not st.session_state.user_logged_in:
     login_page()
 else:
-    if tabs == "Chat":
-        main_chat()
-    elif tabs == "Analytics":
-        analytics_tab()
-    else:
-        news_tab()
+    if tabs == "Chat": main_chat()
+    elif tabs == "Analytics": analytics_tab()
+    else: news_tab()
