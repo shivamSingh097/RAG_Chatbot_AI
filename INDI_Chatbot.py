@@ -33,9 +33,9 @@ from langchain_community.utilities import GoogleSerperAPIWrapper, WikipediaAPIWr
 from langchain.tools import WikipediaQueryRun
 
 # ---------------- API Keys ----------------
-HF_TOKEN = os.environ.get("HUGGINGFACEHUB_API_TOKEN", st.secrets.get("HUGGINGFACEHUB_API_TOKEN"))
-SERPER_API_KEY = os.environ.get("SERPER_API_KEY", st.secrets.get("SERPER_API_KEY"))
-NEWS_API_KEY = os.environ.get("NEWS_API_KEY", st.secrets.get("NEWS_API_KEY"))
+HF_TOKEN = st.secrets["HUGGINGFACEHUB_API_TOKEN"]
+SERPER_API_KEY = st.secrets("SERPER_API_KEY"))
+NEWS_API_KEY = st.secrets("NEWS_API_KEY"))
 if not HF_TOKEN:
     st.error("❌ Hugging Face token missing.")
     st.stop()
