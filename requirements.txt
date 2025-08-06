@@ -10,3 +10,6 @@ wikipedia
 google-search-results
 pyttsx3
 newsapi-python
+textblob
+gtts
+numpy
