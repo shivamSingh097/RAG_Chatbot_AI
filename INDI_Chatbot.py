@@ -178,13 +178,14 @@ def main_app():
         found_in_history = False
         
         # Check if the question is in the current chat history
+        # Note: This check only works for identical questions. The new logic below is smarter.
         for i in range(len(st.session_state.messages) - 1, -1, -1):
             if st.session_state.messages[i]["role"] == "user" and st.session_state.messages[i]["content"] == user_question:
                 if i + 1 < len(st.session_state.messages):
                     ai_answer = st.session_state.messages[i+1]["content"]
                     st.session_state.messages.append({"role": "assistant", "content": ai_answer})
                     with st.chat_message("assistant"):
-                        st.markdown("**(Found in chat history):** " + ai_answer)
+                        st.markdown(ai_answer)
                     found_in_history = True
                     break
 
@@ -195,15 +196,27 @@ def main_app():
                     # First, attempt to answer from local documents
                     local_answer = qa_chain.run(user_question)
                     
+                    # Check for vague or unhelpful answers from local QA
                     if "i don't know" not in local_answer.lower() and "i could not find" not in local_answer.lower():
                         final_response = local_answer
+                        response_placeholder.info("📚 Answer found in local documents.")
                     else:
                         # If local search is not helpful, perform a Wikipedia search
                         response_placeholder.info("🔍 Local knowledge base did not have a clear answer. Searching Wikipedia...")
                         wiki_summary = wikipedia.run(user_question)
                         
-                        # Use a more explicit prompt to synthesize the answer
-                        prompt = f"Based on the following Wikipedia search results, answer the user's question concisely: '{user_question}'. \n\nWikipedia Results:\n{wiki_summary}"
+                        # New: Use a more explicit prompt to synthesize the answer
+                        # This tells the LLM to act like a helpful assistant
+                        prompt = f"""
+                        You are a helpful assistant. Based on the following Wikipedia search results, answer the user's question concisely and professionally.
+                        If the results are not relevant, state that you could not find the information.
+                        
+                        User's question: '{user_question}' 
+                        
+                        Wikipedia Results:
+                        {wiki_summary}
+                        
+                        Final Answer:"""
                         
                         # Use the LLM to generate the final response from Wikipedia data
                         final_response = llm.invoke(prompt)
@@ -212,6 +225,7 @@ def main_app():
                     with st.chat_message("assistant"):
                         st.markdown(final_response)
                         
+                    # Save the new conversation to the history file
                     if st.session_state.current_chat_id is None:
                         st.session_state.current_chat_id = str(datetime.now().timestamp())
                     save_chat_history(st.session_state.current_chat_id, user_question, final_response)
@@ -219,7 +233,6 @@ def main_app():
                 except Exception as e:
                     st.error("❌ An error occurred while generating the response.")
                     st.exception(e)
-            st.rerun()
 
 # ===================== Sidebar and Entry Point =====================
 st.set_page_config(page_title="INDIBOT AI", layout="wide")
