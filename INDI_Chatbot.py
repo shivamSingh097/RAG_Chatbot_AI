@@ -160,87 +160,105 @@ qa_chain = ConversationalRetrievalChain.from_llm(
 wikipedia = WikipediaQueryRun(api_wrapper=WikipediaAPIWrapper())
 
 # ===================== Main App Logic =====================
+def get_intent_response(user_msg):
+    """Check rule-based knowledge base for a quick response"""
+    knowledge_base = {
+        "what is your name": "🤖 I'm IndiBot, your friendly AI assistant!",
+        "how are you": "😊 I'm just code, but thanks for asking! How can I help?",
+        "tell me a joke": "😄 Why did the developer go broke? Because they used up all their cache!",
+        "what can you do": "🧠 I can answer questions, search the web, and more. Try me!",
+    }
+
+    cleaned = user_msg.lower().strip()
+    return knowledge_base.get(cleaned, None)
+
+
+def extract_intents_keywords(text):
+    """Simple NLP keyword-based intent recognition"""
+    keywords = {
+        "name": "🤖 I'm IndiBot, your AI assistant!",
+        "hello": "👋 Hello! How can I help you today?",
+        "hi": "👋 Hi there! Ask me anything.",
+        "order pizza": "🍕 Sure! Please provide size and toppings (Demo action triggered)",
+        "thank you": f"You're welcome, {st.session_state.get('user_name', 'friend')}! 😊",
+    }
+
+    for keyword in keywords:
+        if keyword in text.lower():
+            return keywords[keyword]
+    return None
+
+
 def main_app():
     st.title("🧠 IndiBot AI")
     st.write("Ask me anything about AI, Python, Economy, General Knowledge or Live Web Search! ✨")
 
-    # Display chat history
+    # Display history
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
     if user_question := st.chat_input("🎤 Ask your question..."):
-        # Add user question to chat
         st.session_state.messages.append({"role": "user", "content": user_question})
         with st.chat_message("user"):
             st.markdown(user_question)
 
         with st.spinner("🔄 Thinking..."):
             try:
-                # 🔍 Try Vector DB (local knowledge base)
-                local_answer = qa_chain.invoke({
-                    "question": user_question,
-                    "chat_history": st.session_state.chat_history
-                })
+                # Step 1: Rule-based (Exact Match)
+                rule_response = get_intent_response(user_question)
+                if rule_response:
+                    final_response = rule_response
 
-                final_response = local_answer.get("answer", "").strip()
+                else:
+                    # Step 2: NLP-style Intent Matching
+                    intent_response = extract_intents_keywords(user_question)
+                    if intent_response:
+                        final_response = intent_response
 
-                # Check if local result is vague or unhelpful
-                vague_responses = ["i don't know", "i could not find", "i'm not sure", "no information found"]
-                if any(phrase in final_response.lower() for phrase in vague_responses) or not final_response:
-                    st.info("📚 Vector DB didn’t help. Searching Wikipedia...")
-
-                    wiki_summary = wikipedia.run(user_question).strip()
-
-                    if not wiki_summary or "may refer to" in wiki_summary.lower():
-                        st.warning("📖 Wikipedia was unclear. Using Google Search (Serper API)...")
-
-                        from langchain_community.utilities import GoogleSerperAPIWrapper
-                        google_search = GoogleSerperAPIWrapper()
-
-                        serp_results = google_search.run(user_question)
-
-                        prompt = f"""
-                        You are a helpful assistant. Based on the following Google search results, answer the user's question clearly and professionally.
-                        If the results are not relevant, say you couldn't find the information.
-
-                        User's Question: "{user_question}"
-
-                        Google Results:
-                        {serp_results}
-
-                        Final Answer:
-                        """
-                        final_response = llm.invoke(prompt)
                     else:
-                        prompt = f"""
-                        You are a helpful assistant. Based on the following Wikipedia search results, answer the user's question concisely and professionally.
-                        If the results are not relevant, state that you could not find the information.
+                        # Step 3: Local Knowledge Base (RAG)
+                        local_answer = qa_chain.invoke({"question": user_question, "chat_history": st.session_state.chat_history})
+                        final_response = local_answer['answer']
 
-                        User's question: '{user_question}' 
+                        if "i don't know" in final_response.lower() or "could not find" in final_response.lower() or "unanswerable" in final_response.lower():
+                            st.info("🤔 Couldn't find locally. Trying Wikipedia...")
 
-                        Wikipedia Results:
-                        {wiki_summary}
+                            # Step 4: Wikipedia fallback
+                            wiki_summary = wikipedia.run(user_question)
+                            if "unanswerable" in wiki_summary.lower() or len(wiki_summary.strip()) < 10:
+                                st.info("🌐 Wikipedia failed. Trying Google Search (Parser API)...")
 
-                        Final Answer:"""
-                        final_response = llm.invoke(prompt)
+                                # Step 5: Parser API Search fallback
+                                try:
+                                    parser_result = google_parser_search.run(user_question)
+                                    final_response = f"🌍 Google says: {parser_result}"
+                                except Exception as e:
+                                    final_response = "❌ All search methods failed. Please rephrase."
 
-                # Final fallback if all sources fail
-                if not final_response.strip():
-                    final_response = "🙏 I'm sorry, I couldn't find a clear answer. Could you please rephrase or ask something else?"
+                            else:
+                                # Final answer synthesis from wiki
+                                prompt = f"""
+                                You are a helpful assistant. Based on the following Wikipedia result, answer the user's question.
+                                Question: {user_question}
+                                Wiki Summary: {wiki_summary}
+                                Answer:"""
+                                final_response = llm.invoke(prompt)
 
-                # Append assistant message
-                st.session_state.messages.append({"role": "assistant", "content": final_response})
+                # Show bot reply
                 with st.chat_message("assistant"):
                     st.markdown(final_response)
 
-                # Save chat to history
+                # Store message
+                st.session_state.messages.append({"role": "assistant", "content": final_response})
+
+                # Save chat to file
                 if st.session_state.current_chat_id is None:
                     st.session_state.current_chat_id = str(datetime.now().timestamp())
                 save_chat_history(st.session_state.current_chat_id, user_question, final_response)
 
             except Exception as e:
-                st.error("❌ An error occurred while generating the response.")
+                st.error("❌ An error occurred.")
                 st.exception(e)
 
 
