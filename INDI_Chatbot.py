@@ -34,8 +34,8 @@ from langchain.tools import WikipediaQueryRun
 
 # ---------------- API Keys ----------------
 HF_TOKEN = st.secrets["HUGGINGFACEHUB_API_TOKEN"]
-SERPER_API_KEY = st.secrets("SERPER_API_KEY"))
-NEWS_API_KEY = st.secrets("NEWS_API_KEY"))
+SERPER_API_KEY = st.secrets["SERPER_API_KEY"]
+NEWS_API_KEY = st.secrets["NEWS_API_KEY"]
 if not HF_TOKEN:
     st.error("❌ Hugging Face token missing.")
     st.stop()
