@@ -17,6 +17,12 @@ sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 
 # NLP and ML
 import spacy
+try:
+    nlp = spacy.load("en_core_web_sm")
+except OSError:
+    from spacy.cli import download
+    download("en_core_web_sm", False)  # Download to user space
+    nlp = spacy.load("en_core_web_sm")
 from spacy.cli import download as spacy_download
 from textblob import TextBlob
 from sentence_transformers import SentenceTransformer, util
