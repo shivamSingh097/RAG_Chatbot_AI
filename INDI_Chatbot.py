@@ -1,4 +1,5 @@
 import os
+os.environ["STREAMLIT_WATCHDOG"] = "false"
 import sys
 import json
 import pickle
