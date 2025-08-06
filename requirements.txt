@@ -13,3 +13,4 @@ newsapi-python
 textblob
 gtts
 numpy
+faiss-cpu
