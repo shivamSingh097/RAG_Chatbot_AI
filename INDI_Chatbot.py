@@ -224,17 +224,25 @@ def main_app():
                         if "i don't know" in final_response.lower() or "could not find" in final_response.lower() or "unanswerable" in final_response.lower():
                             st.info("🤔 Couldn't find locally. Trying Wikipedia...")
 
-                            # Step 4: Wikipedia fallback
                             wiki_summary = wikipedia.run(user_question)
-                            if "unanswerable" in wiki_summary.lower() or len(wiki_summary.strip()) < 10:
-                                st.info("🌐 Wikipedia failed. Trying Google Search (Parser API)...")
 
-                                # Step 5: Parser API Search fallback
+                            # ✅ Check if result is relevant (contains a keyword from question)
+                            if any(keyword.lower() in wiki_summary.lower() for keyword in ["india", "states", "state", "number", "how many"]):
+                                prompt = f"""
+                                You are a helpful assistant. Based on the following Wikipedia snippet, answer the user's question clearly.
+                                
+                                Question: {user_question}
+                                Wikipedia Snippet: {wiki_summary}
+                                
+                                Final Answer:"""
+                                final_response = llm.invoke(prompt)
+                            else:
+                                st.info("🌐 Wikipedia wasn't helpful. Trying Google Search via Parser API...")
                                 try:
                                     parser_result = google_parser_search.run(user_question)
-                                    final_response = f"🌍 Google says: {parser_result}"
+                                    final_response = f"🔍 Google says: {parser_result}"
                                 except Exception as e:
-                                    final_response = "❌ All search methods failed. Please rephrase."
+                                    final_response = "❌ All sources failed to provide a good answer."
 
                             else:
                                 # Final answer synthesis from wiki
