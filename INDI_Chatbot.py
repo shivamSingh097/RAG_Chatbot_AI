@@ -141,7 +141,7 @@ if "user_logged_in" not in st.session_state or not st.session_state.user_logged_
 text_generation_pipeline = pipeline(
     "text2text-generation",
     model="google/flan-t5-base",
-    max_new_tokens=1024,  # Increased token count for longer output
+    max_new_tokens=512,
     temperature=0.7
 )
 llm = HuggingFacePipeline(pipeline=text_generation_pipeline)
@@ -248,4 +248,4 @@ if user_question := st.chat_input("🎤 Ask your question..."):
                 
             except Exception as e:
                 st.error(f"❌ An error occurred: {e}")
-    st.rerun()
+                st.exception(e) # This will display the full traceback for debugging
