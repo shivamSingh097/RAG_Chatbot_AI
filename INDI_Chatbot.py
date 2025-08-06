@@ -189,38 +189,37 @@ def main_app():
                     break
 
         if not found_in_history:
-            with st.spinner("🔄 Checking local documents..."):
+            response_placeholder = st.empty()
+            with st.spinner("🔄 Searching for an answer..."):
                 try:
+                    # First, attempt to answer from local documents
                     local_answer = qa_chain.run(user_question)
-                    st.session_state.messages.append({"role": "assistant", "content": local_answer})
-                    with st.chat_message("assistant"):
-                        st.markdown(local_answer)
+                    
+                    if "i don't know" not in local_answer.lower() and "i could not find" not in local_answer.lower():
+                        final_response = local_answer
+                    else:
+                        # If local search is not helpful, perform a Wikipedia search
+                        response_placeholder.info("🔍 Local knowledge base did not have a clear answer. Searching Wikipedia...")
+                        wiki_summary = wikipedia.run(user_question)
                         
-                    # Save the new conversation to the history file
-                    if st.session_state.current_chat_id is None:
-                        st.session_state.current_chat_id = str(datetime.now().timestamp())
-                    save_chat_history(st.session_state.current_chat_id, user_question, local_answer)
-                    
-                except Exception as e:
-                    st.error("❌ Local QA failed.")
-                    st.exception(e)
-            
-            with st.spinner("🌐 Performing web search..."):
-                try:
-                    # Use a Wikipedia search as a fallback if local search is not helpful
-                    wiki_result = wikipedia.run(user_question)
-                    final_answer = f"### 🌐 Wikipedia Result\n{wiki_result}"
-                    st.session_state.messages.append({"role": "assistant", "content": final_answer})
+                        # Use a more explicit prompt to synthesize the answer
+                        prompt = f"Based on the following Wikipedia search results, answer the user's question concisely: '{user_question}'. \n\nWikipedia Results:\n{wiki_summary}"
+                        
+                        # Use the LLM to generate the final response from Wikipedia data
+                        final_response = llm.invoke(prompt)
+
+                    st.session_state.messages.append({"role": "assistant", "content": final_response})
                     with st.chat_message("assistant"):
-                        st.markdown(final_answer)
-                    
+                        st.markdown(final_response)
+                        
                     if st.session_state.current_chat_id is None:
                         st.session_state.current_chat_id = str(datetime.now().timestamp())
-                    save_chat_history(st.session_state.current_chat_id, user_question, final_answer)
+                    save_chat_history(st.session_state.current_chat_id, user_question, final_response)
                     
                 except Exception as e:
-                    st.warning("⚠️ Web search failed.")
-                    st.error(str(e))
+                    st.error("❌ An error occurred while generating the response.")
+                    st.exception(e)
+            st.rerun()
 
 # ===================== Sidebar and Entry Point =====================
 st.set_page_config(page_title="INDIBOT AI", layout="wide")
