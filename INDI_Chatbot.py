@@ -9,10 +9,15 @@ from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
 from langchain_community.llms import HuggingFacePipeline
 from langchain_community.utilities import GoogleSerperAPIWrapper
-from langchain.agents import Tool, initialize_agent
+from langchain.agents import Tool
 from langchain.tools import WikipediaQueryRun
 from langchain_community.utilities import WikipediaAPIWrapper
 from datetime import datetime
+import pysqlite3
+import sys
+
+# ===================== Fix for ChromaDB and sqlite3 on Streamlit Cloud =====================
+sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 
 # ===================== API Keys & Configuration =====================
 HF_TOKEN = os.environ.get("HUGGINGFACEHUB_API_TOKEN", st.secrets.get("HUGGINGFACEHUB_API_TOKEN"))
@@ -39,6 +44,8 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 if "current_chat_id" not in st.session_state:
     st.session_state.current_chat_id = None
+if "user_logged_in" not in st.session_state:
+    st.session_state.user_logged_in = False
 if "username" not in st.session_state:
     st.session_state.username = "Guest"
 
@@ -133,11 +140,8 @@ def login_page():
                         json.dump(users, f, indent=4)
                     st.success("Registration successful! You can now log in.")
 
-if "user_logged_in" not in st.session_state or not st.session_state.user_logged_in:
-    login_page()
-    st.stop()
-
 # ===================== LLM & Chains =====================
+# This part is outside the login function, so it only runs after login
 text_generation_pipeline = pipeline(
     "text2text-generation",
     model="google/flan-t5-base",
@@ -146,37 +150,79 @@ text_generation_pipeline = pipeline(
 )
 llm = HuggingFacePipeline(pipeline=text_generation_pipeline)
 
-# Use a tool-based agent to decide between Wikipedia and local search
-wikipedia = WikipediaQueryRun(api_wrapper=WikipediaAPIWrapper())
-local_qa = ConversationalRetrievalChain.from_llm(
+# Use a standard retrieval chain instead of an agent to avoid the AttributeError
+qa_chain = ConversationalRetrievalChain.from_llm(
     llm,
     retriever=vector_db.as_retriever(search_kwargs={"k": 3}),
     memory=ConversationBufferMemory(memory_key="chat_history", return_messages=True)
 )
 
-tools = [
-    Tool(
-        name="Local QA",
-        func=local_qa.run,
-        description="""Useful for answering questions about AI, Python, Economy, and general knowledge from local documents. 
-        Input should be a standalone question."""
-    ),
-    Tool(
-        name="Wikipedia Search",
-        func=wikipedia.run,
-        description="""Useful for answering a wide range of questions by searching on Wikipedia. 
-        Input should be a standalone query."""
-    )
-]
+wikipedia = WikipediaQueryRun(api_wrapper=WikipediaAPIWrapper())
 
-agent = initialize_agent(
-    tools,
-    llm,
-    agent="zero-shot-react-description",
-    verbose=True
-)
+# ===================== Main App Logic =====================
+def main_app():
+    st.title("🧠 IndiBot AI")
+    st.write("Ask me anything about AI, Python, Economy, General Knowledge or Live Web Search! ✨")
 
-# ===================== Sidebar =====================
+    # Display chat messages from history on app rerun
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    if user_question := st.chat_input("🎤 Ask your question..."):
+        # Display user message in chat message container
+        st.session_state.messages.append({"role": "user", "content": user_question})
+        with st.chat_message("user"):
+            st.markdown(user_question)
+            
+        found_in_history = False
+        
+        # Check if the question is in the current chat history
+        for i in range(len(st.session_state.messages) - 1, -1, -1):
+            if st.session_state.messages[i]["role"] == "user" and st.session_state.messages[i]["content"] == user_question:
+                if i + 1 < len(st.session_state.messages):
+                    ai_answer = st.session_state.messages[i+1]["content"]
+                    st.session_state.messages.append({"role": "assistant", "content": ai_answer})
+                    with st.chat_message("assistant"):
+                        st.markdown("**(Found in chat history):** " + ai_answer)
+                    found_in_history = True
+                    break
+
+        if not found_in_history:
+            with st.spinner("🔄 Checking local documents..."):
+                try:
+                    local_answer = qa_chain.run(user_question)
+                    st.session_state.messages.append({"role": "assistant", "content": local_answer})
+                    with st.chat_message("assistant"):
+                        st.markdown(local_answer)
+                        
+                    # Save the new conversation to the history file
+                    if st.session_state.current_chat_id is None:
+                        st.session_state.current_chat_id = str(datetime.now().timestamp())
+                    save_chat_history(st.session_state.current_chat_id, user_question, local_answer)
+                    
+                except Exception as e:
+                    st.error("❌ Local QA failed.")
+                    st.exception(e)
+            
+            with st.spinner("🌐 Performing web search..."):
+                try:
+                    # Use a Wikipedia search as a fallback if local search is not helpful
+                    wiki_result = wikipedia.run(user_question)
+                    final_answer = f"### 🌐 Wikipedia Result\n{wiki_result}"
+                    st.session_state.messages.append({"role": "assistant", "content": final_answer})
+                    with st.chat_message("assistant"):
+                        st.markdown(final_answer)
+                    
+                    if st.session_state.current_chat_id is None:
+                        st.session_state.current_chat_id = str(datetime.now().timestamp())
+                    save_chat_history(st.session_state.current_chat_id, user_question, final_answer)
+                    
+                except Exception as e:
+                    st.warning("⚠️ Web search failed.")
+                    st.error(str(e))
+
+# ===================== Sidebar and Entry Point =====================
 st.set_page_config(page_title="INDIBOT AI", layout="wide")
 with st.sidebar:
     st.header("👤 Profile")
@@ -204,48 +250,8 @@ with st.sidebar:
         st.session_state.chat_history = []
         st.session_state.current_chat_id = None
         st.rerun()
-
-# ===================== Main UI =====================
-st.title("🧠 IndiBot AI")
-st.write("Ask me anything about AI, Python, Economy, General Knowledge or Live Web Search! ✨")
-
-# Display chat messages from history on app rerun
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
-
-if user_question := st.chat_input("🎤 Ask your question..."):
-    # Display user message in chat message container
-    st.session_state.messages.append({"role": "user", "content": user_question})
-    with st.chat_message("user"):
-        st.markdown(user_question)
         
-    found_in_history = False
-    
-    # Check if the question is in the current chat history
-    for i in range(len(st.session_state.messages) - 1, -1, -1):
-        if st.session_state.messages[i]["role"] == "user" and st.session_state.messages[i]["content"] == user_question:
-            if i + 1 < len(st.session_state.messages):
-                ai_answer = st.session_state.messages[i+1]["content"]
-                st.session_state.messages.append({"role": "assistant", "content": ai_answer})
-                with st.chat_message("assistant"):
-                    st.markdown("**(Found in chat history):** " + ai_answer)
-                found_in_history = True
-                break
-
-    if not found_in_history:
-        with st.spinner("🔄 Thinking..."):
-            try:
-                # Use the agent to decide whether to use local QA or Wikipedia
-                response = agent.run(user_question)
-                st.session_state.messages.append({"role": "assistant", "content": response})
-                with st.chat_message("assistant"):
-                    st.markdown(response)
-                
-                if st.session_state.current_chat_id is None:
-                    st.session_state.current_chat_id = str(datetime.now().timestamp())
-                save_chat_history(st.session_state.current_chat_id, user_question, response)
-                
-            except Exception as e:
-                st.error(f"❌ An error occurred: {e}")
-                st.exception(e) # This will display the full traceback for debugging
+if not st.session_state.user_logged_in:
+    login_page()
+else:
+    main_app()
