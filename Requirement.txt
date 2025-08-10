@@ -1,0 +1,10 @@
+streamlit
+pillow
+python-dotenv
+transformers
+torch
+langchain
+langchain-community
+faiss-cpu
+google-search-results
+chromadb
