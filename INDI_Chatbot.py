@@ -248,8 +248,8 @@ def main_chat():
                     if wiki_summary and not "no good match found" in wiki_summary.lower():
                         prompt = f"Question: {user_question}\nWikipedia: {wiki_summary}\nAnswer:"
                         final_response = llm.invoke(prompt)
-                    elif Google Search:
-                        final_response = Google Search.run(user_question)
+                    elif GoogleSearch:
+                        final_response = GoogleSearch.run(user_question)
                     else:
                         final_response = "I couldn't find relevant information using my internal knowledge, Wikipedia, or Google Search."
         
