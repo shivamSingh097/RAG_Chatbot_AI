@@ -276,11 +276,27 @@ def duckduckgo_search(query):
     except Exception:
         return ""
 
-def wikipedia_search(query):
+import wikipedia
+
+def fetch_wikipedia_summary(query):
     try:
-        return wikipedia.summary(query, sentences=3)
-    except Exception:
-        return ""
+        search_results = wikipedia.search(query)
+        if not search_results:
+            return "I couldn't find information about that."
+
+        # Try to pick the most relevant result
+        for title in search_results:
+            if query.lower() in title.lower():
+                page = wikipedia.page(title)
+                return page.summary
+
+        # Fallback: just take the first result
+        page = wikipedia.page(search_results[0])
+        return page.summary
+
+    except Exception as e:
+        return f"Error fetching Wikipedia data: {str(e)}"
+
 
 def google_search_snippet(query):
     if not GOOGLE_ENABLED:
