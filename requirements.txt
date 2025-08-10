@@ -1,10 +1,16 @@
 streamlit
+wikipedia
+spacy
+textblob
+sentence-transformers
+numpy
+gtts
 langchain
-faiss-cpu
-openai
-python-dotenv
-<<<<<<< HEAD
-tiktoken
-=======
-tiktoken
->>>>>>> 817256bdca6d0823bb94447e4ee7089169b5053a
+langchain-community
+ctransformers
+beautifulsoup4
+requests
+duckduckgo-search
+huggingface_hub
+# Optional: install googlesearch if you want Google fallback
+googlesearch-python
