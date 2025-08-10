@@ -372,7 +372,7 @@ def login_page():
                 st.session_state.user_logged_in = True
                 st.session_state.user_id = uid
                 st.session_state.username = username
-                st.experimental_rerun()
+                st.rerun()
             else:
                 st.error("Invalid username/password")
         st.write("---")
