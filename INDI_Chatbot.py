@@ -189,6 +189,7 @@ if vector_db:
                                                     memory=ConversationBufferMemory(memory_key="chat_history", return_messages=True))
 
 wikipedia = WikipediaQueryRun(api_wrapper=WikipediaAPIWrapper())
+# Change the variable name from "Google Search" to "Google Search"
 Google Search = GoogleSerperAPIWrapper(serper_api_key=SERPER_API_KEY) if SERPER_API_KEY else None
 if not SERPER_API_KEY:
     st.warning("⚠️ Serper API key not found. Google Search functionality will be disabled.")
