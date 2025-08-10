@@ -214,7 +214,7 @@ qa_chain = ConversationalRetrievalChain.from_llm(
 wikipedia = WikipediaQueryRun(api_wrapper=WikipediaAPIWrapper())
 GoogleSearch = GoogleSerperAPIWrapper(serper_api_key=SERPER_API_KEY) if SERPER_API_KEY else None
 if not SERPER_API_KEY:
-    st.warning("⚠️ Serper API key not found. GoogleSearch functionality will be disabled.")
+    st.warning("⚠️ Serper API key not found. Google Search functionality will be disabled.")
 
 
 # ===================== Helpers =====================
@@ -264,4 +264,96 @@ def main_chat():
                 try:
                     rag_answer = qa_chain.invoke({"question": user_question, "chat_history": st.session_state.chat_history})
                     final_response = rag_answer["answer"]
-                except
+                except Exception as e:
+                    st.error(f"RAG query failed: {e}")
+                    final_response = llm.invoke(f"Answer the following question: {user_question}")
+
+                if not final_response or "i don't know" in final_response.lower():
+                    wiki_summary = wikipedia.run(user_question)
+                    if wiki_summary and not "no good match found" in wiki_summary.lower():
+                        prompt = f"Question: {user_question}\nWikipedia: {wiki_summary}\nAnswer:"
+                        final_response = llm.invoke(prompt)
+                    elif Google Search:
+                        final_response = Google Search.run(user_question)
+                    else:
+                        final_response = "I couldn't find relevant information using my internal knowledge, Wikipedia, or Google Search."
+        
+        st.session_state.messages.append({"role": "assistant", "content": final_response})
+        with st.chat_message("assistant"):
+            st.markdown(final_response)
+            if st.button("🔊 Speak", key=f"voice_{len(st.session_state.messages)}"):
+                audio_file = speak_text(final_response)
+                st.audio(audio_file)
+                os.remove(audio_file)
+        
+        save_chat_history(str(datetime.now().timestamp()), user_question, final_response, tone)
+        st.session_state.analytics.append({"question": user_question, "tone": tone, "timestamp": datetime.now().isoformat()})
+
+# ===================== Analytics Tab =====================
+def analytics_tab():
+    st.title("📊 Chat Analytics")
+    if not st.session_state.analytics:
+        st.write("No analytics yet.")
+        return
+    
+    df = [{"Tone": a["tone"], "Time": a["timestamp"]} for a in st.session_state.analytics]
+    
+    chart = alt.Chart(alt.Data(values=df)).mark_bar().encode(
+        x=alt.X("Tone:N", axis=None), 
+        y=alt.Y("count()", title="Number of Queries")
+    )
+    st.altair_chart(chart, use_container_width=True)
+    
+    st.subheader("Recent Queries")
+    for i, entry in enumerate(reversed(st.session_state.analytics)):
+        st.write(f"{i+1}. **Query:** {entry['question']} | **Tone:** {entry['tone']} | **Time:** {entry['timestamp'][:19]}")
+
+# ===================== News Tab =====================
+def news_tab():
+    st.title("📰 Top News Headlines")
+    news = fetch_news()
+    for n in news: 
+        st.write(n)
+
+# ===================== Main Application Entry Point =====================
+st.set_page_config(page_title="INDIBOT AI", layout="wide")
+
+if not st.session_state.user_logged_in:
+    login_page()
+else:
+    # Sidebar for navigation
+    st.sidebar.title(f"Hello, {st.session_state.user_name} 👋")
+    tabs = st.sidebar.radio("Choose a page", ["Chat", "Analytics", "News"])
+    if st.sidebar.button("Toggle Dark Mode"): 
+        st.session_state.dark_mode = not st.session_state.dark_mode
+        st.rerun()
+    if st.sidebar.button("Logout"):
+        st.session_state.user_logged_in = False
+        st.session_state.messages = []
+        st.session_state.chat_history = []
+        st.rerun()
+
+    # Apply dark mode style
+    if st.session_state.dark_mode:
+        st.markdown("""
+            <style>
+            body, .stApp { background-color: #121212; color: #f0f0f0; }
+            .stTextInput, .stTextArea { background-color: #333 !important; color: white; }
+            .css-1cpxqw2 { background-color: #1f1f1f !important; }
+            .element-container:has(.stSpinner) .stSpinner { color: #00FFAA; }
+            </style>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown("""
+            <style>
+            body, .stApp { background-color: #ffffff; color: #000000; }
+            </style>
+        """, unsafe_allow_html=True)
+
+    # Render the selected page
+    if tabs == "Chat":
+        main_chat()
+    elif tabs == "Analytics":
+        analytics_tab()
+    elif tabs == "News":
+        news_tab()
