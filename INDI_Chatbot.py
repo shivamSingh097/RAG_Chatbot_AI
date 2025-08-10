@@ -39,17 +39,19 @@ except Exception:
 from ctransformers import AutoModelForCausalLM as CTransformers
 from langchain_community.llms import HuggingFaceHub
 
-MODEL_PATH = "./mistral-7b-instruct-v0.2.Q4_K_M.gguf"
+# Path to local GGUF model file
+MODEL_GGUF_FILENAME = "mistral-7b-instruct-v0.2.Q4_K_M.gguf"
 
-if os.path.exists(MODEL_PATH):
-    # Local GGUF model
-    llm = CTransformers(model=MODEL_PATH, model_type="mistral")
-else:
-    # Cloud fallback - Hugging Face Inference API
-    from langchain.llms import HuggingFaceHub
-    llm = HuggingFaceHub(
-        repo_id="mistralai/Mistral-7B-Instruct-v0.2",
-        model_kwargs={"temperature":0.7, "max_length":512}
+@st.cache_resource
+def load_local_llm():
+    if not os.path.exists(MODEL_GGUF_FILENAME):
+        st.error(f"Local model file not found: {MODEL_GGUF_FILENAME}. LLM responses will be disabled until file is present.")
+        return None
+
+    return CTransformers(
+        model=MODEL_GGUF_FILENAME,
+        model_type="mistral",
+        config={"temperature": 0.7, "max_new_tokens": 512}
     )
 
 FAISS_INDEX_PATH = "faiss_index.pkl"
