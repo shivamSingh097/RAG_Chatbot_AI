@@ -26,10 +26,15 @@ HF_TOKEN = os.environ.get("HUGGINGFACEHUB_API_TOKEN", st.secrets.get("HUGGINGFAC
 if not HF_TOKEN:
     st.error("❌ Hugging Face token is missing. Add it to .streamlit/secrets.toml")
     st.stop()
-login(HF_TOKEN)
+
+try:
+    login(HF_TOKEN)
+except Exception:
+    st.warning("⚠️ Hugging Face login failed. Check token in Streamlit secrets.")
 
 SERPER_API_KEY = os.environ.get("SERPER_API_KEY", st.secrets.get("SERPER_API_KEY"))
 NEWS_API_KEY = st.secrets.get("NEWS_API_KEY")
+
 # ===================== Check FAISS Index =====================
 FAISS_INDEX_PATH = "faiss_index.pkl"
 if not os.path.exists(FAISS_INDEX_PATH):
@@ -38,6 +43,21 @@ if not os.path.exists(FAISS_INDEX_PATH):
 
 with open(FAISS_INDEX_PATH, "rb") as f:
     vector_db = pickle.load(f)
+
+# ===================== SpaCy Model and Sentence Transformer =====================
+try:
+    nlp = spacy.load("en_core_web_sm")
+except OSError:
+    st.info("Downloading spaCy model 'en_core_web_sm'...")
+    from spacy.cli import download
+    download("en_core_web_sm")
+    nlp = spacy.load("en_core_web_sm")
+
+@st.cache_resource
+def load_intent_model():
+    return SentenceTransformer('all-MiniLM-L6-v2')
+
+intent_model = load_intent_model()
 
 # ---------------- Intents ----------------
 INTENT_RESPONSES = {
@@ -88,10 +108,9 @@ if "dark_mode" not in st.session_state:
     st.session_state.dark_mode = False
 if "analytics" not in st.session_state:
     st.session_state.analytics = []
+if "loading" not in st.session_state:
+    st.session_state.loading = False
 
-
-def toggle_theme():
-    st.session_state.dark_mode = not st.session_state.dark_mode
 
 # ---------------- Chat_History ----------------
 USERS_FILE = "users.json"
@@ -140,6 +159,7 @@ def login_page():
                     if user_found:
                         st.session_state.user_logged_in = True
                         st.session_state.username = username
+                        st.session_state.user_name = username # Set user_name after login
                         st.rerun()
                     else:
                         st.error("Invalid username or password.")
@@ -171,18 +191,18 @@ def login_page():
                         json.dump(users, f, indent=4)
                     st.success("Registration successful! You can now log in.")
 
-if "user_logged_in" not in st.session_state:
-    login_page()
-    st.stop()
-
 # ===================== LLM (Hugging Face Hub) =====================
-text_generation_pipeline = pipeline(
-    "text2text-generation",  # For FLAN-T5
-    model="google/flan-t5-base",
-    max_new_tokens=256,
-    temperature=0.7
-)
-llm = HuggingFacePipeline(pipeline=text_generation_pipeline)
+@st.cache_resource
+def load_llm():
+    text_generation_pipeline = pipeline(
+        "text2text-generation",
+        model="google/flan-t5-base",
+        max_new_tokens=256,
+        temperature=0.7
+    )
+    return HuggingFacePipeline(pipeline=text_generation_pipeline)
+
+llm = load_llm()
 
 # ===================== Retrieval QA (with conversation memory) =====================
 memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
@@ -192,30 +212,23 @@ qa_chain = ConversationalRetrievalChain.from_llm(
     memory=memory
 )
 wikipedia = WikipediaQueryRun(api_wrapper=WikipediaAPIWrapper())
-GoogleSearch = GoogleSerperAPIWrapper(serper_api_key=SERPER_API_KEY) if SERPER_API_KEY else None
+Google Search = GoogleSerperAPIWrapper(serper_api_key=SERPER_API_KEY) if SERPER_API_KEY else None
 if not SERPER_API_KEY:
     st.warning("⚠️ Serper API key not found. Google Search functionality will be disabled.")
 
 
-# ===================== Google Search (Serper API) =====================
-use_web_search = bool(SERPER_API_KEY)
-if use_web_search:
-    search = GoogleSerperAPIWrapper(serper_api_key=SERPER_API_KEY)
-    web_search_tool = Tool(
-        name="Google Search",
-        description="Fetch real-time web search results",
-        func=search.run
-    )
-# ---------------- Helpers ----------------
+# ===================== Helpers =====================
 def fetch_news():
     if not NEWS_API_KEY:
         return ["⚠️ NEWS_API_KEY not configured. News functionality is disabled."]
     url = f"https://newsapi.org/v2/top-headlines?country=us&apiKey={NEWS_API_KEY}"
-    r = requests.get(url)
-    if r.status_code == 200:
+    try:
+        r = requests.get(url)
+        r.raise_for_status() # Raise an HTTPError for bad responses (4xx or 5xx)
         articles = r.json().get("articles", [])
         return [f"- {a['title']}" for a in articles[:5]]
-    return ["Failed to fetch news."]
+    except requests.exceptions.RequestException as e:
+        return [f"Failed to fetch news: {e}"]
 
 def speak_text(text):
     tts = gTTS(text)
@@ -223,109 +236,32 @@ def speak_text(text):
     tts.save(file_path)
     return file_path
 
-# ===================== Sidebar =====================
-st.set_page_config(page_title="INDIBOT AI", layout="wide")
-tabs = st.sidebar.radio("Choose a page", ["Chat", "Analytics", "News"])
-if st.sidebar.button("Toggle Dark Mode"): st.session_state.dark_mode = not st.session_state.dark_mode; st.rerun()
-if st.sidebar.button("Logout"):
-    st.session_state.user_logged_in = False
-    st.session_state.messages = []
-    st.session_state.chat_history = []
-    st.rerun()
-
-if st.session_state.dark_mode:
-    st.markdown("""<style>body, .stApp { background-color: #121212; color: #f0f0f0; }</style>""", unsafe_allow_html=True)
+# ===================== Main Chat Logic =====================
+def main_chat():
+    st.title("🧠 INDIBOT AI - Chat")
     
-if not st.session_state.user_logged_in:
-    login_page()
-else:
-    if tabs == "Chat": main_chat()
-    elif tabs == "Analytics": analytics_tab()
-    else: news_tab()
+    # Display previous messages
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
 
-# ===================== Main UI =====================
-st.title("🧠 INDIBOT")
-st.markdown("Ask me anything about AI, Python, Economy, General Knowledge or Live Web Search! ✨")
-
-user_question = st.text_input("🎤 Ask your question:", placeholder="Type your query here...")
-if st.button("Get Answer") or user_question:
-    if user_question:
-        st.session_state.loading = True
-        with st.spinner("🔄 Thinking..."):
-            try:
-                local_answer = qa_chain.run(user_question)
-                st.session_state.loading = False
-                st.chat_message("user", avatar="👤").write(user_question)
-                st.chat_message("ai", avatar="🤖").write(local_answer)
-                st.session_state.chat_history.append({
-                    "user": st.session_state.username,
-                    "query": user_question,
-                    "answer": local_answer
-                })
-            except Exception as e:
-                st.session_state.loading = False
-                st.error(f"❌ Local QA failed: {e}")
-    else:
-                    if qa_chain:
-                        try:
-                            rag_answer = qa_chain.invoke({"question": user_question, "chat_history": st.session_state.chat_history})
-                            final_response = rag_answer["answer"]
-                        except Exception as e:
-                            st.error(f"RAG query failed: {e}")
-                            final_response = llm.invoke(f"Answer the following question: {user_question}")
-                    else:
-                        final_response = llm.invoke(f"Answer the following question: {user_question}")
-    
-                    # Fallback to Wikipedia and Google Search if RAG fails or gives a generic answer
-                    if not final_response or "i don't know" in final_response.lower():
-                        wiki_summary = wikipedia.run(user_question)
-                        if wiki_summary and not "no good match found" in wiki_summary.lower():
-                            prompt = f"Question: {user_question}\nWikipedia: {wiki_summary}\nAnswer:"
-                            final_response = llm.invoke(prompt)
-                        elif GoogleSearch:
-                            final_response = GoogleSearch.run(user_question)
-                        else:
-                            final_response = "I couldn't find relevant information using my internal knowledge, Wikipedia, or Google Search."
-            
-            st.session_state.messages.append({"role": "assistant", "content": final_response})
-            with st.chat_message("assistant"):
-                st.markdown(final_response)
-                if st.button("🔊 Speak", key=f"voice_{len(st.session_state.messages)}"):
-                    audio_file = speak_text(final_response)
-                    st.audio(audio_file)
-                    os.remove(audio_file) # Clean up the audio file
-            
-            save_chat_history(str(datetime.now().timestamp()), user_question, final_response, tone)
-            st.session_state.analytics.append({"question": user_question, "tone": tone, "timestamp": datetime.now().isoformat()})
-
-        # ============ Run Web Search if API available ============
-        if use_web_search:
-            try:
-                web_result = web_search_tool.run(user_question)
-                st.markdown("### 🌐 Web Search Result")
-                st.info(web_result)
-            except Exception as e:
-                st.warning("⚠️ Web search failed.")
-                st.error(str(e))
-# ---------------- News Tab ----------------
-def news_tab():
-    st.title("📰 Top News Headlines")
-    news = fetch_news()
-    for n in news: st.write(n)
-
-# ===================== Theme CSS =====================
-if st.session_state.dark_mode:
-    st.markdown("""
-        <style>
-        body, .stApp { background-color: #121212; color: #f0f0f0; }
-        .stTextInput, .stTextArea { background-color: #333 !important; color: white; }
-        .css-1cpxqw2 { background-color: #1f1f1f !important; }
-        .element-container:has(.stSpinner) .stSpinner { color: #00FFAA; }
-        </style>
-    """, unsafe_allow_html=True)
-else:
-    st.markdown("""
-        <style>
-        body, .stApp { background-color: #ffffff; color: #000000; }
-        </style>
-    """, unsafe_allow_html=True)
+    # Handle user input
+    if user_question := st.chat_input("Ask your question..."):
+        st.session_state.messages.append({"role": "user", "content": user_question})
+        with st.chat_message("user"): 
+            st.markdown(user_question)
+        
+        entities, tone = analyze_entities_and_sentiment(user_question)
+        intent = classify_intent(user_question)
+        st.info(f"Tone: **{tone}**, Entities: {entities if entities else 'None'}")
+        
+        with st.spinner("Thinking..."):
+            final_response = ""
+            if intent and intent in INTENT_RESPONSES:
+                name = st.session_state.user_name or "Friend"
+                final_response = INTENT_RESPONSES[intent].format(name=name)
+            else:
+                try:
+                    rag_answer = qa_chain.invoke({"question": user_question, "chat_history": st.session_state.chat_history})
+                    final_response = rag_answer["answer"]
+                except
