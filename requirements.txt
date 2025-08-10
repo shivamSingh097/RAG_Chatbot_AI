@@ -1,7 +1,7 @@
 streamlit
-<<<<<<< HEAD
 wikipedia
 spacy
+en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
 textblob
 sentence-transformers
 numpy
@@ -13,22 +13,4 @@ beautifulsoup4
 requests
 duckduckgo-search
 huggingface_hub
-# Optional: install googlesearch if you want Google fallback
 googlesearch-python
-=======
-spacy>=3.7.2
-sentence-transformers
-transformers
-langchain
-langchain-community
-altair
-pysqlite3-binary
-wikipedia
-google-search-results
-pyttsx3
-newsapi-python
-textblob
-gtts
-numpy
-faiss-cpu
->>>>>>> 2f9c9a04f5722a25f010696b2df418cb449123e5
