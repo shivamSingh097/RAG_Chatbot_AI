@@ -212,9 +212,9 @@ qa_chain = ConversationalRetrievalChain.from_llm(
     memory=memory
 )
 wikipedia = WikipediaQueryRun(api_wrapper=WikipediaAPIWrapper())
-Google Search = GoogleSerperAPIWrapper(serper_api_key=SERPER_API_KEY) if SERPER_API_KEY else None
+GoogleSearch = GoogleSerperAPIWrapper(serper_api_key=SERPER_API_KEY) if SERPER_API_KEY else None
 if not SERPER_API_KEY:
-    st.warning("⚠️ Serper API key not found. Google Search functionality will be disabled.")
+    st.warning("⚠️ Serper API key not found. GoogleSearch functionality will be disabled.")
 
 
 # ===================== Helpers =====================
