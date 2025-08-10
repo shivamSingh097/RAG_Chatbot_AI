@@ -4,3 +4,6 @@ faiss_index.pkl
 .env
 .streamlit/secrets.toml
 faiss_index.pkl
+.env
+.streamlit/secrets.toml
+faiss_index.pkl
