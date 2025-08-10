@@ -517,7 +517,7 @@ def main_chat():
                     st.error(f"TTS failed: {e}")
 
         # update conversation list in sidebar by reloading
-        st.experimental_rerun()
+        st.rerun()
 
 # ========== Entrypoint ==========
 if "user_logged_in" not in st.session_state:
