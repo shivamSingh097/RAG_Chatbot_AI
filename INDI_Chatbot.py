@@ -1,5 +1,6 @@
 import os
 import pickle
+import sys
 import json
 import streamlit as st
 from PIL import Image
@@ -8,8 +9,17 @@ from transformers import pipeline
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
 from langchain_community.llms import HuggingFacePipeline
-from langchain_community.utilities import GoogleSerperAPIWrapper
+from langchain_community.utilities import GoogleSerperAPIWrapper, WikipediaAPIWrapper
+from langchain.tools import WikipediaQueryRun
 from langchain.agents import Tool
+import requests
+from datetime import datetime
+import altair as alt
+import spacy
+from textblob import TextBlob
+from sentence_transformers import SentenceTransformer, util
+import numpy as np
+from gtts import gTTS
 
 # ===================== API Keys =====================
 HF_TOKEN = os.environ.get("HUGGINGFACEHUB_API_TOKEN", st.secrets.get("HUGGINGFACEHUB_API_TOKEN"))
@@ -19,7 +29,7 @@ if not HF_TOKEN:
 login(HF_TOKEN)
 
 SERPER_API_KEY = os.environ.get("SERPER_API_KEY", st.secrets.get("SERPER_API_KEY"))
-
+NEWS_API_KEY = st.secrets.get("NEWS_API_KEY")
 # ===================== Check FAISS Index =====================
 FAISS_INDEX_PATH = "faiss_index.pkl"
 if not os.path.exists(FAISS_INDEX_PATH):
@@ -29,16 +39,85 @@ if not os.path.exists(FAISS_INDEX_PATH):
 with open(FAISS_INDEX_PATH, "rb") as f:
     vector_db = pickle.load(f)
 
+# ---------------- Intents ----------------
+INTENT_RESPONSES = {
+    "greeting": "Hello {name}! How can I help you today?",
+    "creator": "I was created by Shivam Singh Bhadoriya.",
+    "feeling": "I'm just a bunch of code, but feeling great! 😎",
+    "name": "I'm INDIBOT, your AI assistant.",
+    "bye": "Goodbye {name}! Have a wonderful day."
+}
+INTENT_PATTERNS = {
+    "greeting": ["hi", "hello", "hey", "good morning", "good evening"],
+    "creator": ["who created you", "who built you", "your developer"],
+    "feeling": ["how are you", "how is it going"],
+    "name": ["what is your name", "who are you"],
+    "bye": ["bye", "goodbye", "see you"]
+}
+
+def classify_intent(user_input):
+    scores = {}
+    for intent, phrases in INTENT_PATTERNS.items():
+        embeddings1 = intent_model.encode(user_input, convert_to_tensor=True)
+        embeddings2 = intent_model.encode(phrases, convert_to_tensor=True)
+        cosine_scores = util.cos_sim(embeddings1, embeddings2)
+        max_score = float(np.max(cosine_scores.cpu().numpy()))
+        scores[intent] = max_score
+    best_intent = max(scores, key=scores.get)
+    return best_intent if scores[best_intent] > 0.55 else None
+
+def analyze_entities_and_sentiment(user_input):
+    doc = nlp(user_input)
+    entities = [(ent.text, ent.label_) for ent in doc.ents]
+    sentiment = TextBlob(user_input).sentiment.polarity
+    tone = "positive" if sentiment > 0.1 else "negative" if sentiment < -0.1 else "neutral"
+    return entities, tone
+
 # ===================== Session State =====================
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
+if "user_logged_in" not in st.session_state:
+    st.session_state.user_logged_in = False
+if "username" not in st.session_state:
+    st.session_state.username = "Guest"
+if "user_name" not in st.session_state:
+    st.session_state.user_name = None
 if "dark_mode" not in st.session_state:
-    st.session_state.dark_mode = True
-if "loading" not in st.session_state:
-    st.session_state.loading = False
+    st.session_state.dark_mode = False
+if "analytics" not in st.session_state:
+    st.session_state.analytics = []
+
 
 def toggle_theme():
     st.session_state.dark_mode = not st.session_state.dark_mode
+
+# ---------------- Chat_History ----------------
+USERS_FILE = "users.json"
+CHAT_HISTORY_FILE = "chat_history.json"
+
+def save_chat_history(chat_id, user_message, ai_message, tone):
+    history = []
+    if os.path.exists(CHAT_HISTORY_FILE):
+        with open(CHAT_HISTORY_FILE, "r") as f:
+            history = json.load(f)
+    chat_found = False
+    for chat in history:
+        if chat["id"] == chat_id:
+            chat["conversation"].append({"user": user_message, "ai": ai_message, "tone": tone})
+            chat["last_updated"] = datetime.now().isoformat()
+            chat_found = True
+            break
+    if not chat_found:
+        history.append({
+            "id": chat_id,
+            "title": user_message[:30] + "...",
+            "last_updated": datetime.now().isoformat(),
+            "conversation": [{"user": user_message, "ai": ai_message, "tone": tone}]
+        })
+    with open(CHAT_HISTORY_FILE, "w") as f:
+        json.dump(history, f, indent=4)
 
 # ===================== Authentication =====================
 def login_page():
@@ -112,6 +191,11 @@ qa_chain = ConversationalRetrievalChain.from_llm(
     retriever=vector_db.as_retriever(search_kwargs={"k": 3}),
     memory=memory
 )
+wikipedia = WikipediaQueryRun(api_wrapper=WikipediaAPIWrapper())
+GoogleSearch = GoogleSerperAPIWrapper(serper_api_key=SERPER_API_KEY) if SERPER_API_KEY else None
+if not SERPER_API_KEY:
+    st.warning("⚠️ Serper API key not found. Google Search functionality will be disabled.")
+
 
 # ===================== Google Search (Serper API) =====================
 use_web_search = bool(SERPER_API_KEY)
@@ -122,26 +206,42 @@ if use_web_search:
         description="Fetch real-time web search results",
         func=search.run
     )
+# ---------------- Helpers ----------------
+def fetch_news():
+    if not NEWS_API_KEY:
+        return ["⚠️ NEWS_API_KEY not configured. News functionality is disabled."]
+    url = f"https://newsapi.org/v2/top-headlines?country=us&apiKey={NEWS_API_KEY}"
+    r = requests.get(url)
+    if r.status_code == 200:
+        articles = r.json().get("articles", [])
+        return [f"- {a['title']}" for a in articles[:5]]
+    return ["Failed to fetch news."]
+
+def speak_text(text):
+    tts = gTTS(text)
+    file_path = "response.mp3"
+    tts.save(file_path)
+    return file_path
 
 # ===================== Sidebar =====================
-st.set_page_config(page_title="INDI_Chatbot", layout="wide")
-with st.sidebar:
-    try:
-        logo = Image.open("INDIBOT.png")
-        st.image(logo, width=100)
-    except:
-        st.markdown("⚠️ Add 'INDIBOT.png' in your project folder.")
-    st.title("📚 Chat History")
-    for msg in reversed(st.session_state.chat_history):
-        st.markdown(f"- 💬 {msg['query'][:30]}...")
-    if st.button("🆕 New Chat"):
-        st.session_state.chat_history.clear()
-        st.rerun()
-    st.markdown("---")
-    if st.button("🌓 Toggle Theme"):
-        toggle_theme()
-        st.rerun()
-    st.markdown(f"👤 Logged in as: {st.session_state.username}")
+st.set_page_config(page_title="INDIBOT AI", layout="wide")
+tabs = st.sidebar.radio("Choose a page", ["Chat", "Analytics", "News"])
+if st.sidebar.button("Toggle Dark Mode"): st.session_state.dark_mode = not st.session_state.dark_mode; st.rerun()
+if st.sidebar.button("Logout"):
+    st.session_state.user_logged_in = False
+    st.session_state.messages = []
+    st.session_state.chat_history = []
+    st.rerun()
+
+if st.session_state.dark_mode:
+    st.markdown("""<style>body, .stApp { background-color: #121212; color: #f0f0f0; }</style>""", unsafe_allow_html=True)
+    
+if not st.session_state.user_logged_in:
+    login_page()
+else:
+    if tabs == "Chat": main_chat()
+    elif tabs == "Analytics": analytics_tab()
+    else: news_tab()
 
 # ===================== Main UI =====================
 st.title("🧠 INDIBOT")
@@ -165,6 +265,38 @@ if st.button("Get Answer") or user_question:
             except Exception as e:
                 st.session_state.loading = False
                 st.error(f"❌ Local QA failed: {e}")
+    else:
+                    if qa_chain:
+                        try:
+                            rag_answer = qa_chain.invoke({"question": user_question, "chat_history": st.session_state.chat_history})
+                            final_response = rag_answer["answer"]
+                        except Exception as e:
+                            st.error(f"RAG query failed: {e}")
+                            final_response = llm.invoke(f"Answer the following question: {user_question}")
+                    else:
+                        final_response = llm.invoke(f"Answer the following question: {user_question}")
+    
+                    # Fallback to Wikipedia and Google Search if RAG fails or gives a generic answer
+                    if not final_response or "i don't know" in final_response.lower():
+                        wiki_summary = wikipedia.run(user_question)
+                        if wiki_summary and not "no good match found" in wiki_summary.lower():
+                            prompt = f"Question: {user_question}\nWikipedia: {wiki_summary}\nAnswer:"
+                            final_response = llm.invoke(prompt)
+                        elif GoogleSearch:
+                            final_response = GoogleSearch.run(user_question)
+                        else:
+                            final_response = "I couldn't find relevant information using my internal knowledge, Wikipedia, or Google Search."
+            
+            st.session_state.messages.append({"role": "assistant", "content": final_response})
+            with st.chat_message("assistant"):
+                st.markdown(final_response)
+                if st.button("🔊 Speak", key=f"voice_{len(st.session_state.messages)}"):
+                    audio_file = speak_text(final_response)
+                    st.audio(audio_file)
+                    os.remove(audio_file) # Clean up the audio file
+            
+            save_chat_history(str(datetime.now().timestamp()), user_question, final_response, tone)
+            st.session_state.analytics.append({"question": user_question, "tone": tone, "timestamp": datetime.now().isoformat()})
 
         # ============ Run Web Search if API available ============
         if use_web_search:
@@ -175,6 +307,11 @@ if st.button("Get Answer") or user_question:
             except Exception as e:
                 st.warning("⚠️ Web search failed.")
                 st.error(str(e))
+# ---------------- News Tab ----------------
+def news_tab():
+    st.title("📰 Top News Headlines")
+    news = fetch_news()
+    for n in news: st.write(n)
 
 # ===================== Theme CSS =====================
 if st.session_state.dark_mode:
