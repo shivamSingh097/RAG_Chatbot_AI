@@ -359,7 +359,7 @@ def render_sidebar(user_id):
     st.sidebar.markdown("---")
     if st.sidebar.button("🗑️ Clear all chats"):
         delete_all_user_chats(user_id)
-        st.experimental_rerun()
+        st.rerun()
     st.sidebar.markdown("---")
     st.sidebar.write("Model loaded: " + ("✅" if llm is not None else "❌"))
     st.sidebar.write("Google fallback: " + ("✅" if GOOGLE_ENABLED else "❌"))
